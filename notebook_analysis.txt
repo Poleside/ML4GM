@@ -1,0 +1,1035 @@
+
+====================================================================================================
+04_MLP.ipynb - CV CELLS
+====================================================================================================
+
+[CODE CELL 2]
+
+import itertools
+from sklearn.model_selection import GroupKFold
+
+# ---- MLP 超参数网格搜索（Grid Search）----
+# 网格设计依据：
+#   - 论文结构为 512→256→128，dropout=0.3 → 以此为中心扩展上下两档
+#   - 162K 大样本支持 512 宽层，不易欠拟合
+#   - lr 覆盖 1e-4~1e-3；weight_decay 两档正则化强度
+TUNING_EPOCHS = 50   # 调参阶段快速估算轮数
+TUNING_FOLDS  = 3    # 使用前 3 折（节省时间）
+
+param_grid_mlp = {
+    "hidden_sizes":  [(512, 256, 128), (256, 128, 64), (512, 256, 64)],
+    "dropout":       [0.2, 0.3, 0.4],
+    "learning_rate": [1e-4, 5e-4, 1e-3],
+    "weight_decay":  [1e-5, 1e-4],
+}
+# 3×3×3×2 = 54 组合
+
+gkf      = GroupKFold(n_splits=5)
+cv_splits = list(gkf.split(X_all, y_all, groups=rgiid_all))[:TUNING_FOLDS]
+
+keys   = list(param_grid_mlp.keys())
+combos = list(itertools.product(*param_grid_mlp.values()))
+print(f"[MLP 调参] 网格大小: {len(combos)} 组合 × {TUNING_FOLDS} 折")
+
+best_score, best_params_mlp = float("-inf"), {}
+for ci, combo in enumerate(combos):
+    params = dict(zip(keys, combo))
+    fold_scores = []
+    for fi, (tr_idx, va_idx) in enumerate(cv_splits):
+        X_tr, y_tr_ = X_all[tr_idx], y_all[tr_idx]
+        X_va, y_va  = X_all[va_idx],  y_all[va_idx]
+        sc = StandardScaler()
+        X_tr_s, X_va_s = sc.fit_transform(X_tr), sc.transform(X_va)
+        setup_seed(42)
+        m    = MLPModel(X_tr_s.shape[1], params["hidden_sizes"], params["dropout"]).to(device)
+        opt_ = torch.optim.Adam(m.parameters(),
+                                lr=params["learning_rate"], weight_decay=params["weight_decay"])
+        crit_= nn.MSELoss()
+        ldr  = DataLoader(TabularDataset(X_tr_s, y_tr_),
+                          batch_size=512, shuffle=True, num_workers=0)
+        for _ in range(TUNING_EPOCHS):
+            m.train()
+            for X_b, y_b in ldr:
+                out = m(X_b.to(device))
+                loss = crit_(out, y_b.to(device))
+                opt_.zero_grad(); loss.backward(); opt_.step()
+        fold_scores.append(r2_score(y_va, predict_batched(m, X_va_s)))
+    mean_r2 = float(np.mean(fold_scores))
+    print(f"  [{ci+1:3d}/{len(combos)}] hidden={params['hidden_sizes']} "
+          f"drop={params['dropout']:.1f} lr={params['learning_rate']:.0e} "
+          f"wd={params['weight_decay']:.0e} → R²={mean_r2:.4f}")
+    if mean_r2 > best_score:
+        best_score      = mean_r2
+        best_params_mlp = params
+
+hidden_sizes     = best_params_mlp["hidden_sizes"]
+dropout          = best_params_mlp["dropout"]
+learning_rate    = best_params_mlp["learning_rate"]
+weight_decay_val = best_params_mlp["weight_decay"]
+batch_size       = 512
+epochs           = 500
+patience         = 30
+print(f"\n[MLP 调参] Best R²={best_score:.4f}")
+print(f"  hidden_sizes={hidden_sizes}, dropout={dropout:.2f}, "
+      f"lr={learning_rate:.2e}, weight_decay={weight_decay_val:.2e}")
+
+====================================================================================================
+[CODE CELL 6]
+
+unique_years = sorted(np.unique(year_all))
+loyo_rows_ann = []
+all_y_true, all_y_pred = [], []   # OOF 收集
+
+for fold_i, fold_year in enumerate(unique_years, 1):
+    print(f"\n[LOYO-ANN] ===== Fold {fold_i:2d}/20 | Held-out year: {fold_year} =====")
+    tr_mask = year_all != fold_year
+    te_mask = year_all == fold_year
+
+    X_tr, y_tr = X_all[tr_mask], y_all[tr_mask]
+    X_te, y_te = X_all[te_mask], y_all[te_mask]
+
+    sc = StandardScaler()
+    X_tr_std = sc.fit_transform(X_tr)
+    X_te_std = sc.transform(X_te)
+
+    # 从训练集中随机留 10% 用于 early stopping（不参与测试评估）
+    n_tr = len(X_tr_std)
+    rng  = np.random.RandomState(42)
+    va_idx = rng.choice(n_tr, size=int(n_tr * 0.1), replace=False)
+    tr_idx = np.setdiff1d(np.arange(n_tr), va_idx)
+
+    tr_ldr = DataLoader(TabularDataset(X_tr_std[tr_idx], y_tr[tr_idx]),
+                        batch_size=512, shuffle=True,  num_workers=0)
+    va_ldr = DataLoader(TabularDataset(X_tr_std[va_idx], y_tr[va_idx]),
+                        batch_size=512, shuffle=False, num_workers=0)
+
+    setup_seed(42)
+    fold_model = MLPModel(X_tr_std.shape[1], hidden_sizes, dropout).to(device)
+    opt  = torch.optim.Adam(fold_model.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=10, factor=0.5)
+    crit = nn.MSELoss()
+
+    best_val_r2_fold, patience_counter_fold, best_state_fold = float("-inf"), 0, None
+
+    for epoch in range(1, 501):
+        fold_model.train()
+        for X_b, y_b in tr_ldr:
+            out  = fold_model(X_b.to(device))
+            loss = crit(out, y_b.to(device))
+            opt.zero_grad(); loss.backward(); opt.step()
+
+        fold_model.eval()
+        va_real_f, va_pred_f, va_losses_f = [], [], []
+        with torch.no_grad():
+            for X_b, y_b in va_ldr:
+                out = fold_model(X_b.to(device))
+                va_real_f.extend(y_b.numpy().flatten())
+                va_pred_f.extend(out.cpu().numpy().flatten())
+                va_losses_f.append(crit(out, y_b.to(device)).item())
+        va_r2_f   = r2_score(va_real_f, va_pred_f)
+        sch.step(float(np.mean(va_losses_f)))
+
+        if va_r2_f > best_val_r2_fold:
+            best_val_r2_fold      = va_r2_f
+            patience_counter_fold = 0
+            best_state_fold       = {k: v.clone() for k, v in fold_model.state_dict().items()}
+        else:
+            patience_counter_fold += 1
+        if patience_counter_fold >= 30:
+            print(f"  Early stopping at epoch {epoch}, best val R²={best_val_r2_fold:.4f}")
+            break
+
+    fold_model.load_state_dict(best_state_fold)
+    y_pred = predict_batched(fold_model, X_te_std)
+
+    all_y_true.extend(y_te.tolist())
+    all_y_pred.extend(y_pred.tolist())
+
+    r2   = float(r2_score(y_te, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_te, y_pred)))
+    mae  = float(mean_absolute_error(y_te, y_pred))
+
+    loyo_rows_ann.append({
+        "year": fold_year, "n_train": int(tr_mask.sum()),
+        "n_test": int(te_mask.sum()), "R2": r2, "RMSE": rmse, "MAE": mae,
+    })
+    print(f"[LOYO-ANN] Year {fold_year} | n_test={te_mask.sum()} | "
+          f"R2={r2:.4f} | RMSE={rmse:.4f} | MAE={mae:.4f}")
+
+loyo_ann_df = pd.DataFrame(loyo_rows_ann)
+loyo_ann_path = os.path.join(outputs_dir, "ann_loyo_results.csv")
+loyo_ann_df.to_csv(loyo_ann_path, index=False)
+
+print(f"\n[LOYO-ANN] ===== Summary ({len(unique_years)} folds) =====")
+print(f"  R²   mean={loyo_ann_df['R2'].mean():.4f}  std={loyo_ann_df['R2'].std():.4f}  "
+      f"min={loyo_ann_df['R2'].min():.4f}  max={loyo_ann_df['R2'].max():.4f}")
+print(f"  RMSE mean={loyo_ann_df['RMSE'].mean():.4f}  std={loyo_ann_df['RMSE'].std():.4f}")
+print(f"  MAE  mean={loyo_ann_df['MAE'].mean():.4f}  std={loyo_ann_df['MAE'].std():.4f}")
+print(f"  Saved to: {loyo_ann_path}")
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 5), dpi=100)
+axes[0].bar(loyo_ann_df["year"], loyo_ann_df["R2"], color="steelblue", alpha=0.8)
+axes[0].axhline(loyo_ann_df["R2"].mean(), color="r", linestyle="--",
+                label=f"Mean R²={loyo_ann_df['R2'].mean():.4f}")
+axes[0].set_xlabel("Held-out Year", fontsize=13)
+axes[0].set_ylabel("R²", fontsize=13)
+axes[0].set_title("LOYO — Per-Year R² (MLP/ANN)", fontsize=15)
+axes[0].legend()
+
+axes[1].bar(loyo_ann_df["year"], loyo_ann_df["RMSE"], color="darkorange", alpha=0.8)
+axes[1].axhline(loyo_ann_df["RMSE"].mean(), color="r", linestyle="--",
+                label=f"Mean RMSE={loyo_ann_df['RMSE'].mean():.4f}")
+axes[1].set_xlabel("Held-out Year", fontsize=13)
+axes[1].set_ylabel("RMSE (m/yr)", fontsize=13)
+axes[1].set_title("LOYO — Per-Year RMSE (MLP/ANN)", fontsize=15)
+axes[1].legend()
+
+plt.tight_layout()
+plt.show()
+plt.close()
+
+# ---- OOF 散点图（Bolibar et al. 2020 Figure 9 风格） ----
+all_y_true_np = np.array(all_y_true)
+all_y_pred_np = np.array(all_y_pred)
+r2_oof   = float(r2_score(all_y_true_np, all_y_pred_np))
+rmse_oof = float(np.sqrt(mean_squared_error(all_y_true_np, all_y_pred_np)))
+mae_oof  = float(mean_absolute_error(all_y_true_np, all_y_pred_np))
+
+fig, ax = plt.subplots(figsize=(7, 7), dpi=100)
+ax.scatter(all_y_true_np, all_y_pred_np, alpha=0.15, s=8, c="steelblue")
+lims = [float(all_y_true_np.min()), float(all_y_true_np.max())]
+ax.plot(lims, lims, "r--", linewidth=1.5)
+ax.set_xlabel("Observed dhdt (m/yr)", fontsize=13)
+ax.set_ylabel("Predicted dhdt (m/yr)", fontsize=13)
+ax.set_title(f"LOYO Out-of-Fold Predictions (MLP/ANN)\n"
+             f"R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}", fontsize=13)
+plt.tight_layout()
+plt.show()
+plt.close()
+print(f"[LOYO-ANN OOF] R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}  n={len(all_y_true_np)}")
+
+====================================================================================================
+[CODE CELL 7]
+
+from sklearn.model_selection import GroupKFold
+
+CV_EPOCHS   = 200
+CV_PATIENCE = 20
+
+# ── 辅助函数：冰川/年份折编号 ──────────────────────────────────────────
+def make_glacier_fold(rgiid_arr, n_folds=5):
+    glacier_sorted = np.sort(np.unique(rgiid_arr))
+    n_glaciers = len(glacier_sorted)
+    gid_to_fold = {gid: int(i * n_folds // n_glaciers)
+                   for i, gid in enumerate(glacier_sorted)}
+    return np.array([gid_to_fold[g] for g in rgiid_arr], dtype=int)
+
+def make_year_fold(year_arr, n_folds=5):
+    year_sorted = np.sort(np.unique(year_arr))
+    n_years = len(year_sorted)
+    yr_to_fold = {yr: int(i * n_folds // n_years)
+                  for i, yr in enumerate(year_sorted)}
+    return np.array([yr_to_fold[y] for y in year_arr], dtype=int)
+
+def train_fold_ann(X_tr_s, y_tr, X_te_s, y_te, fold_label):
+    """训练一折 ANN，返回 (r2, rmse, mae)"""
+    n_tr = len(X_tr_s)
+    rng_ = np.random.RandomState(42)
+    va_i = rng_.choice(n_tr, size=int(n_tr * 0.1), replace=False)
+    tr_i = np.setdiff1d(np.arange(n_tr), va_i)
+
+    tr_ldr = DataLoader(TabularDataset(X_tr_s[tr_i], y_tr[tr_i]),
+                        batch_size=512, shuffle=True,  num_workers=0)
+    setup_seed(42)
+    m    = MLPModel(X_tr_s.shape[1], hidden_sizes, dropout).to(device)
+    opt_ = torch.optim.Adam(m.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch_ = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_, patience=5, factor=0.5)
+    crit_= nn.MSELoss()
+
+    best_va, pat_, best_st = float("-inf"), 0, None
+    for ep in range(1, CV_EPOCHS + 1):
+        m.train()
+        for X_b, y_b in tr_ldr:
+            out  = m(X_b.to(device))
+            loss = crit_(out, y_b.to(device))
+            opt_.zero_grad(); loss.backward(); opt_.step()
+        va_preds = predict_batched(m, X_tr_s[va_i])
+        va_r2    = r2_score(y_tr[va_i], va_preds)
+        sch_.step(-va_r2)
+        if va_r2 > best_va:
+            best_va = va_r2; pat_ = 0
+            best_st = {k: v.cpu().clone() for k, v in m.state_dict().items()}
+        else:
+            pat_ += 1
+        if pat_ >= CV_PATIENCE:
+            print(f"  {fold_label}: early stop @ epoch {ep}, val R²={best_va:.4f}")
+            break
+    m.load_state_dict(best_st)
+    y_pred = predict_batched(m, X_te_s)
+    r2   = float(r2_score(y_te, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_te, y_pred)))
+    mae  = float(mean_absolute_error(y_te, y_pred))
+    return r2, rmse, mae
+
+# ── 5-fold 空间 GroupKFold CV ─────────────────────────────────────────
+gkf_cv = GroupKFold(n_splits=5)
+spatial_rows = []
+
+for fold_i, (tr_idx, te_idx) in enumerate(
+        gkf_cv.split(X_all, y_all, groups=rgiid_all), 1):
+
+    assert len(set(rgiid_all[tr_idx]) & set(rgiid_all[te_idx])) == 0, \
+        f"Fold {fold_i}: spatial leakage detected!"
+
+    sc = StandardScaler()
+    X_tr_s = sc.fit_transform(X_all[tr_idx]).astype(np.float32)
+    X_te_s = sc.transform(X_all[te_idx]).astype(np.float32)
+    y_tr   = y_all[tr_idx].astype(np.float32)
+    y_te   = y_all[te_idx].astype(np.float32)
+
+    print(f"\n[ANN Spatial CV] Fold {fold_i}/5 | n_train={len(tr_idx)} | n_test={len(te_idx)}")
+    r2, rmse, mae = train_fold_ann(X_tr_s, y_tr, X_te_s, y_te, f"Fold{fold_i}")
+    n_test_glaciers = len(np.unique(rgiid_all[te_idx]))
+
+    spatial_rows.append({
+        "fold": fold_i, "n_train": len(tr_idx), "n_test": len(te_idx),
+        "n_test_glaciers": n_test_glaciers, "R2": r2, "RMSE": rmse, "MAE": mae,
+    })
+    print(f"[ANN Spatial CV] Fold {fold_i}/5 | glaciers={n_test_glaciers} | "
+          f"R2={r2:.4f} | RMSE={rmse:.4f} | MAE={mae:.4f}")
+
+spatial_df = pd.DataFrame(spatial_rows)
+sp_path = os.path.join(outputs_dir, "ann_spatial_cv_results.csv")
+spatial_df.to_csv(sp_path, index=False)
+
+print(f"\n[ANN Spatial CV] ===== Summary =====")
+print(f"  R²   mean={spatial_df['R2'].mean():.4f}  std={spatial_df['R2'].std():.4f}")
+print(f"  RMSE mean={spatial_df['RMSE'].mean():.4f}  std={spatial_df['RMSE'].std():.4f}")
+print(f"  MAE  mean={spatial_df['MAE'].mean():.4f}  std={spatial_df['MAE'].std():.4f}")
+print(f"  Saved → {sp_path}")
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), dpi=100)
+for ax, metric, color in zip(axes, ["R2", "RMSE", "MAE"],
+                              ["steelblue", "darkorange", "seagreen"]):
+    vals = spatial_df[metric]
+    ax.bar(spatial_df["fold"], vals, color=color, alpha=0.8)
+    ax.axhline(vals.mean(), color="r", linestyle="--", label=f"Mean={vals.mean():.4f}")
+    ax.set_xlabel("Fold", fontsize=12); ax.set_ylabel(metric, fontsize=12)
+    ax.set_title(f"ANN Spatial CV — {metric}", fontsize=13); ax.legend()
+plt.tight_layout(); plt.show(); plt.close()
+
+====================================================================================================
+
+====================================================================================================
+05_Seasonal-LSTM.ipynb - CV CELLS
+====================================================================================================
+
+[CODE CELL 2]
+
+import itertools
+from sklearn.model_selection import GroupKFold
+
+# ---- Seasonal-LSTM 超参数网格搜索（Grid Search）----
+# 网格设计依据：
+#   - 162K 大样本支持较大隐层（512），不易欠拟合
+#   - 序列长度固定为 12 步（月度气候），hidden 128/256/512 足以编码季节性模式
+#   - 1-2 层 LSTM：序列较短（12步），超过 2 层边际收益有限
+#   - dropout 0.1~0.4 覆盖常用正则化范围；lr 1e-4~1e-3 为 Adam 标准区间
+TUNING_EPOCHS = 50   # 调参阶段快速估算轮数
+TUNING_FOLDS  = 3    # 使用前 3 折（节省时间）
+
+param_grid_slstm = {
+    "hidden":        [128, 256, 512],
+    "num_layers":    [1, 2],
+    "dropout":       [0.1, 0.2, 0.3],
+    "learning_rate": [1e-4, 5e-4, 1e-3],
+    "weight_decay":  [1e-5, 1e-4],
+}
+# 3×2×3×3×2 = 108 组合
+
+gkf      = GroupKFold(n_splits=5)
+cv_splits = list(gkf.split(X_all, y_all, groups=rgiid_all))[:TUNING_FOLDS]
+
+keys   = list(param_grid_slstm.keys())
+combos = list(itertools.product(*param_grid_slstm.values()))
+print(f"[Seasonal-LSTM 调参] 网格大小: {len(combos)} 组合 × {TUNING_FOLDS} 折")
+
+best_score, best_params_slstm = float("-inf"), {}
+for ci, combo in enumerate(combos):
+    params = dict(zip(keys, combo))
+    fold_scores = []
+    for fi, (tr_idx, va_idx) in enumerate(cv_splits):
+        X_tr, y_tr_ = X_all[tr_idx], y_all[tr_idx]
+        X_va, y_va  = X_all[va_idx],  y_all[va_idx]
+        sc = StandardScaler()
+        X_tr_s, X_va_s = sc.fit_transform(X_tr), sc.transform(X_va)
+        setup_seed(42)
+        m    = SeasonalLSTMModel(N_STATIC, 2,
+                                 params["hidden"], params["num_layers"], params["dropout"]).to(device)
+        opt_ = torch.optim.Adam(m.parameters(),
+                                lr=params["learning_rate"], weight_decay=params["weight_decay"])
+        crit_= nn.MSELoss()
+        ldr  = DataLoader(SeasonalDataset(X_tr_s, y_tr_),
+                          batch_size=512, shuffle=True, num_workers=0)
+        for _ in range(TUNING_EPOCHS):
+            m.train()
+            for xs_b, xq_b, y_b in ldr:
+                out = m(xs_b.to(device), xq_b.to(device))
+                loss = crit_(out, y_b.to(device))
+                opt_.zero_grad(); loss.backward(); opt_.step()
+        fold_scores.append(r2_score(y_va, predict_batched_seasonal(m, X_va_s)))
+    mean_r2 = float(np.mean(fold_scores))
+    print(f"  [{ci+1:3d}/{len(combos)}] hidden={params['hidden']} layers={params['num_layers']} "
+          f"drop={params['dropout']:.1f} lr={params['learning_rate']:.0e} "
+          f"wd={params['weight_decay']:.0e} → R²={mean_r2:.4f}")
+    if mean_r2 > best_score:
+        best_score        = mean_r2
+        best_params_slstm = params
+
+lstm_hidden      = best_params_slstm["hidden"]
+lstm_layers      = best_params_slstm["num_layers"]
+dropout          = best_params_slstm["dropout"]
+learning_rate    = best_params_slstm["learning_rate"]
+weight_decay_val = best_params_slstm["weight_decay"]
+batch_size       = 512
+epochs           = 500
+patience         = 30
+print(f"\n[Seasonal-LSTM 调参] Best R²={best_score:.4f}")
+print(f"  hidden={lstm_hidden}, layers={lstm_layers}, dropout={dropout:.2f}, "
+      f"lr={learning_rate:.2e}, weight_decay={weight_decay_val:.2e}")
+
+====================================================================================================
+[CODE CELL 6]
+
+unique_years = sorted(np.unique(year_all))
+loyo_rows_lstm = []
+all_y_true, all_y_pred = [], []   # OOF 收集
+
+for fold_i, fold_year in enumerate(unique_years, 1):
+    print(f"\n[LOYO-LSTM] ===== Fold {fold_i:2d}/20 | Held-out year: {fold_year} =====")
+    tr_mask = year_all != fold_year
+    te_mask = year_all == fold_year
+
+    X_tr, y_tr = X_all[tr_mask], y_all[tr_mask]
+    X_te, y_te = X_all[te_mask], y_all[te_mask]
+
+    sc = StandardScaler()
+    X_tr_std = sc.fit_transform(X_tr)
+    X_te_std = sc.transform(X_te)
+
+    # 从训练集中留 10% 用于 early stopping
+    n_tr = len(X_tr_std)
+    rng  = np.random.RandomState(42)
+    va_idx = rng.choice(n_tr, size=int(n_tr * 0.1), replace=False)
+    tr_idx = np.setdiff1d(np.arange(n_tr), va_idx)
+
+    tr_ldr = DataLoader(SeasonalDataset(X_tr_std[tr_idx], y_tr[tr_idx]),
+                        batch_size=512, shuffle=True,  num_workers=0)
+    va_ldr = DataLoader(SeasonalDataset(X_tr_std[va_idx], y_tr[va_idx]),
+                        batch_size=512, shuffle=False, num_workers=0)
+
+    setup_seed(42)
+    fold_lstm = SeasonalLSTMModel(
+        n_static=N_STATIC, seq_input=2, hidden=lstm_hidden, num_layers=lstm_layers, dropout=dropout
+    ).to(device)
+    opt  = torch.optim.Adam(fold_lstm.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=10, factor=0.5)
+    crit = nn.MSELoss()
+
+    best_val_r2_fold, patience_counter_fold, best_state_fold = float("-inf"), 0, None
+
+    for epoch in range(1, 501):
+        fold_lstm.train()
+        for xs_b, xq_b, y_b in tr_ldr:
+            out  = fold_lstm(xs_b.to(device), xq_b.to(device))
+            loss = crit(out, y_b.to(device))
+            opt.zero_grad(); loss.backward(); opt.step()
+
+        fold_lstm.eval()
+        va_real_f, va_pred_f, va_losses_f = [], [], []
+        with torch.no_grad():
+            for xs_b, xq_b, y_b in va_ldr:
+                out = fold_lstm(xs_b.to(device), xq_b.to(device))
+                va_real_f.extend(y_b.numpy().flatten())
+                va_pred_f.extend(out.cpu().numpy().flatten())
+                va_losses_f.append(crit(out, y_b.to(device)).item())
+        va_r2_f   = r2_score(va_real_f, va_pred_f)
+        sch.step(float(np.mean(va_losses_f)))
+
+        if va_r2_f > best_val_r2_fold:
+            best_val_r2_fold      = va_r2_f
+            patience_counter_fold = 0
+            best_state_fold       = {k: v.clone() for k, v in fold_lstm.state_dict().items()}
+        else:
+            patience_counter_fold += 1
+        if patience_counter_fold >= 30:
+            print(f"  Early stopping at epoch {epoch}, best val R²={best_val_r2_fold:.4f}")
+            break
+
+    fold_lstm.load_state_dict(best_state_fold)
+    y_pred = predict_batched_seasonal(fold_lstm, X_te_std)
+
+    all_y_true.extend(y_te.tolist())
+    all_y_pred.extend(y_pred.tolist())
+
+    r2   = float(r2_score(y_te, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_te, y_pred)))
+    mae  = float(mean_absolute_error(y_te, y_pred))
+
+    loyo_rows_lstm.append({
+        "year": fold_year, "n_train": int(tr_mask.sum()),
+        "n_test": int(te_mask.sum()), "R2": r2, "RMSE": rmse, "MAE": mae,
+    })
+    print(f"[LOYO-LSTM] Year {fold_year} | n_test={te_mask.sum()} | "
+          f"R2={r2:.4f} | RMSE={rmse:.4f} | MAE={mae:.4f}")
+
+loyo_lstm_df = pd.DataFrame(loyo_rows_lstm)
+loyo_lstm_path = os.path.join(outputs_dir, "lstm_loyo_results.csv")
+loyo_lstm_df.to_csv(loyo_lstm_path, index=False)
+
+print(f"\n[LOYO-LSTM] ===== Summary ({len(unique_years)} folds) =====")
+print(f"  R²   mean={loyo_lstm_df['R2'].mean():.4f}  std={loyo_lstm_df['R2'].std():.4f}  "
+      f"min={loyo_lstm_df['R2'].min():.4f}  max={loyo_lstm_df['R2'].max():.4f}")
+print(f"  RMSE mean={loyo_lstm_df['RMSE'].mean():.4f}  std={loyo_lstm_df['RMSE'].std():.4f}")
+print(f"  MAE  mean={loyo_lstm_df['MAE'].mean():.4f}  std={loyo_lstm_df['MAE'].std():.4f}")
+print(f"  Saved to: {loyo_lstm_path}")
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 5), dpi=100)
+axes[0].bar(loyo_lstm_df["year"], loyo_lstm_df["R2"], color="steelblue", alpha=0.8)
+axes[0].axhline(loyo_lstm_df["R2"].mean(), color="r", linestyle="--",
+                label=f"Mean R²={loyo_lstm_df['R2'].mean():.4f}")
+axes[0].set_xlabel("Held-out Year", fontsize=13)
+axes[0].set_ylabel("R²", fontsize=13)
+axes[0].set_title("LOYO — Per-Year R² (Seasonal-LSTM)", fontsize=15)
+axes[0].legend()
+
+axes[1].bar(loyo_lstm_df["year"], loyo_lstm_df["RMSE"], color="darkorange", alpha=0.8)
+axes[1].axhline(loyo_lstm_df["RMSE"].mean(), color="r", linestyle="--",
+                label=f"Mean RMSE={loyo_lstm_df['RMSE'].mean():.4f}")
+axes[1].set_xlabel("Held-out Year", fontsize=13)
+axes[1].set_ylabel("RMSE (m/yr)", fontsize=13)
+axes[1].set_title("LOYO — Per-Year RMSE (Seasonal-LSTM)", fontsize=15)
+axes[1].legend()
+
+plt.tight_layout()
+plt.show()
+plt.close()
+
+# ---- OOF 散点图（Bolibar et al. 2020 Figure 9 风格） ----
+all_y_true_np = np.array(all_y_true)
+all_y_pred_np = np.array(all_y_pred)
+r2_oof   = float(r2_score(all_y_true_np, all_y_pred_np))
+rmse_oof = float(np.sqrt(mean_squared_error(all_y_true_np, all_y_pred_np)))
+mae_oof  = float(mean_absolute_error(all_y_true_np, all_y_pred_np))
+
+fig, ax = plt.subplots(figsize=(7, 7), dpi=100)
+ax.scatter(all_y_true_np, all_y_pred_np, alpha=0.15, s=8, c="steelblue")
+lims = [float(all_y_true_np.min()), float(all_y_true_np.max())]
+ax.plot(lims, lims, "r--", linewidth=1.5)
+ax.set_xlabel("Observed dhdt (m/yr)", fontsize=13)
+ax.set_ylabel("Predicted dhdt (m/yr)", fontsize=13)
+ax.set_title(f"LOYO Out-of-Fold Predictions (Seasonal-LSTM)\n"
+             f"R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}", fontsize=13)
+plt.tight_layout()
+plt.show()
+plt.close()
+print(f"[LOYO-LSTM OOF] R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}  n={len(all_y_true_np)}")
+
+====================================================================================================
+[CODE CELL 7]
+
+from sklearn.model_selection import GroupKFold
+
+CV_EPOCHS   = 200
+CV_PATIENCE = 20
+
+# ── 辅助函数：冰川/年份折编号 ──────────────────────────────────────────
+def make_glacier_fold(rgiid_arr, n_folds=5):
+    glacier_sorted = np.sort(np.unique(rgiid_arr))
+    n_glaciers = len(glacier_sorted)
+    gid_to_fold = {gid: int(i * n_folds // n_glaciers)
+                   for i, gid in enumerate(glacier_sorted)}
+    return np.array([gid_to_fold[g] for g in rgiid_arr], dtype=int)
+
+def make_year_fold(year_arr, n_folds=5):
+    year_sorted = np.sort(np.unique(year_arr))
+    n_years = len(year_sorted)
+    yr_to_fold = {yr: int(i * n_folds // n_years)
+                  for i, yr in enumerate(year_sorted)}
+    return np.array([yr_to_fold[y] for y in year_arr], dtype=int)
+
+def train_fold_slstm(X_tr_s, y_tr, X_te_s, y_te, fold_label):
+    """训练一折 Seasonal-LSTM，返回 (r2, rmse, mae)"""
+    n_tr = len(X_tr_s)
+    rng_ = np.random.RandomState(42)
+    va_i = rng_.choice(n_tr, size=int(n_tr * 0.1), replace=False)
+    tr_i = np.setdiff1d(np.arange(n_tr), va_i)
+
+    tr_ldr = DataLoader(SeasonalDataset(X_tr_s[tr_i], y_tr[tr_i]),
+                        batch_size=512, shuffle=True, num_workers=0)
+    setup_seed(42)
+    m    = SeasonalLSTMModel(N_STATIC, 2, lstm_hidden, lstm_layers, dropout).to(device)
+    opt_ = torch.optim.Adam(m.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch_ = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_, patience=5, factor=0.5)
+    crit_= nn.MSELoss()
+
+    best_va, pat_, best_st = float("-inf"), 0, None
+    for ep in range(1, CV_EPOCHS + 1):
+        m.train()
+        for xs_b, xq_b, y_b in tr_ldr:
+            out  = m(xs_b.to(device), xq_b.to(device))
+            loss = crit_(out, y_b.to(device))
+            opt_.zero_grad(); loss.backward(); opt_.step()
+        va_preds = predict_batched_seasonal(m, X_tr_s[va_i])
+        va_r2    = r2_score(y_tr[va_i], va_preds)
+        sch_.step(-va_r2)
+        if va_r2 > best_va:
+            best_va = va_r2; pat_ = 0
+            best_st = {k: v.cpu().clone() for k, v in m.state_dict().items()}
+        else:
+            pat_ += 1
+        if pat_ >= CV_PATIENCE:
+            print(f"  {fold_label}: early stop @ epoch {ep}, val R²={best_va:.4f}")
+            break
+    m.load_state_dict(best_st)
+    y_pred = predict_batched_seasonal(m, X_te_s)
+    r2   = float(r2_score(y_te, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_te, y_pred)))
+    mae  = float(mean_absolute_error(y_te, y_pred))
+    return r2, rmse, mae
+
+# ── 5-fold 空间 GroupKFold CV ─────────────────────────────────────────
+gkf_cv = GroupKFold(n_splits=5)
+spatial_rows = []
+
+for fold_i, (tr_idx, te_idx) in enumerate(
+        gkf_cv.split(X_all, y_all, groups=rgiid_all), 1):
+
+    assert len(set(rgiid_all[tr_idx]) & set(rgiid_all[te_idx])) == 0, \
+        f"Fold {fold_i}: spatial leakage detected!"
+
+    sc = StandardScaler()
+    X_tr_s = sc.fit_transform(X_all[tr_idx]).astype(np.float32)
+    X_te_s = sc.transform(X_all[te_idx]).astype(np.float32)
+    y_tr   = y_all[tr_idx].astype(np.float32)
+    y_te   = y_all[te_idx].astype(np.float32)
+
+    print(f"\n[SLSTM Spatial CV] Fold {fold_i}/5 | n_train={len(tr_idx)} | n_test={len(te_idx)}")
+    r2, rmse, mae = train_fold_slstm(X_tr_s, y_tr, X_te_s, y_te, f"Fold{fold_i}")
+    n_test_glaciers = len(np.unique(rgiid_all[te_idx]))
+
+    spatial_rows.append({
+        "fold": fold_i, "n_train": len(tr_idx), "n_test": len(te_idx),
+        "n_test_glaciers": n_test_glaciers, "R2": r2, "RMSE": rmse, "MAE": mae,
+    })
+    print(f"[SLSTM Spatial CV] Fold {fold_i}/5 | glaciers={n_test_glaciers} | "
+          f"R2={r2:.4f} | RMSE={rmse:.4f} | MAE={mae:.4f}")
+
+spatial_df = pd.DataFrame(spatial_rows)
+sp_path = os.path.join(outputs_dir, "seasonal_lstm_spatial_cv_results.csv")
+spatial_df.to_csv(sp_path, index=False)
+
+print(f"\n[SLSTM Spatial CV] ===== Summary =====")
+print(f"  R²   mean={spatial_df['R2'].mean():.4f}  std={spatial_df['R2'].std():.4f}")
+print(f"  RMSE mean={spatial_df['RMSE'].mean():.4f}  std={spatial_df['RMSE'].std():.4f}")
+print(f"  MAE  mean={spatial_df['MAE'].mean():.4f}  std={spatial_df['MAE'].std():.4f}")
+print(f"  Saved → {sp_path}")
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), dpi=100)
+for ax, metric, color in zip(axes, ["R2", "RMSE", "MAE"],
+                              ["steelblue", "darkorange", "seagreen"]):
+    vals = spatial_df[metric]
+    ax.bar(spatial_df["fold"], vals, color=color, alpha=0.8)
+    ax.axhline(vals.mean(), color="r", linestyle="--", label=f"Mean={vals.mean():.4f}")
+    ax.set_xlabel("Fold", fontsize=12); ax.set_ylabel(metric, fontsize=12)
+    ax.set_title(f"Seasonal-LSTM Spatial CV — {metric}", fontsize=13); ax.legend()
+plt.tight_layout(); plt.show(); plt.close()
+
+====================================================================================================
+
+====================================================================================================
+06_Temporal_lstm.ipynb - CV CELLS
+====================================================================================================
+
+[CODE CELL 3]
+
+import itertools
+from sklearn.model_selection import GroupKFold
+
+# ---- Temporal-LSTM 超参数网格搜索（Grid Search，含 LOOKBACK）----
+# 网格设计依据：
+#   - 每条冰川恰好 20 年（2000-2019），LOOKBACK=2/3/5 分别保留 18/17/15 个窗口
+#     窗口总量：8101×(20-LOOKBACK)≈120K-145K，均为大样本
+#   - hidden 128/256/512：序列输入维度为 33，较大隐层有利于编码年际变化
+#   - 1-2 层 LSTM：年际序列长度短（≤5步），深层LSTM增益有限
+#   - dropout/lr/weight_decay 与其他模型保持一致的搜索范围
+TUNING_EPOCHS = 50   # 调参阶段快速估算轮数
+TUNING_FOLDS  = 2    # 使用 2 折（LOOKBACK 维度使组合数增至 216，折数适当缩减）
+
+param_grid_tlstm = {
+    "lookback":      [2, 3, 5],
+    "hidden":        [128, 256, 512],
+    "num_layers":    [1, 2],
+    "dropout":       [0.2, 0.3],
+    "learning_rate": [1e-4, 5e-4, 1e-3],
+    "weight_decay":  [1e-5, 1e-4],
+}
+# 3×3×2×2×3×2 = 216 组合
+
+keys   = list(param_grid_tlstm.keys())
+combos = list(itertools.product(*param_grid_tlstm.values()))
+print(f"[Temporal-LSTM 调参] 网格大小: {len(combos)} 组合 × {TUNING_FOLDS} 折")
+
+best_score, best_params_tlstm = float("-inf"), {}
+_cached_windows = {}   # 缓存 build_windows 结果，避免重复构建
+
+for ci, combo in enumerate(combos):
+    params = dict(zip(keys, combo))
+    lb = params["lookback"]
+
+    if lb not in _cached_windows:
+        _cached_windows[lb] = build_windows(lb)
+    X_tr_w, y_tr_w, X_te_w, y_te_w = _cached_windows[lb]
+
+    # 时间顺序切分：各折从训练窗口中均匀取连续段作为验证集
+    n = len(X_tr_w)
+    fold_size = n // (TUNING_FOLDS + 1)
+
+    fold_scores = []
+    for fi in range(TUNING_FOLDS):
+        va_start = (fi + 1) * fold_size
+        va_end   = va_start + fold_size
+        va_mask  = np.zeros(n, dtype=bool)
+        va_mask[va_start:va_end] = True
+        tr_mask  = ~va_mask
+
+        X_tr_f, y_tr_f = X_tr_w[tr_mask], y_tr_w[tr_mask]
+        X_va_f, y_va_f = X_tr_w[va_mask], y_tr_w[va_mask]
+
+        setup_seed(42)
+        m    = TemporalLSTMModel(X_tr_f.shape[-1],
+                                 params["hidden"], params["num_layers"], params["dropout"]).to(device)
+        opt_ = torch.optim.Adam(m.parameters(),
+                                lr=params["learning_rate"], weight_decay=params["weight_decay"])
+        crit_= nn.MSELoss()
+        ldr  = DataLoader(TemporalDataset(X_tr_f, y_tr_f),
+                          batch_size=256, shuffle=True, num_workers=0)
+        for _ in range(TUNING_EPOCHS):
+            m.train()
+            for X_b, y_b in ldr:
+                out  = m(X_b.to(device))
+                loss = crit_(out, y_b.to(device))
+                opt_.zero_grad(); loss.backward(); opt_.step()
+        fold_scores.append(r2_score(y_va_f, predict_temporal(m, X_va_f)))
+
+    mean_r2 = float(np.mean(fold_scores))
+    print(f"  [{ci+1:3d}/{len(combos)}] lb={lb} hidden={params['hidden']} "
+          f"layers={params['num_layers']} drop={params['dropout']:.1f} "
+          f"lr={params['learning_rate']:.0e} wd={params['weight_decay']:.0e} → R²={mean_r2:.4f}")
+    if mean_r2 > best_score:
+        best_score        = mean_r2
+        best_params_tlstm = params
+
+LOOKBACK         = best_params_tlstm["lookback"]
+lstm_hidden      = best_params_tlstm["hidden"]
+lstm_layers      = best_params_tlstm["num_layers"]
+dropout          = best_params_tlstm["dropout"]
+learning_rate    = best_params_tlstm["learning_rate"]
+weight_decay_val = best_params_tlstm["weight_decay"]
+batch_size       = 512
+epochs           = 300
+patience         = 30
+print(f"\n[Temporal-LSTM 调参] Best R²={best_score:.4f}")
+print(f"  LOOKBACK={LOOKBACK}, hidden={lstm_hidden}, layers={lstm_layers}, "
+      f"dropout={dropout:.2f}, lr={learning_rate:.2e}, weight_decay={weight_decay_val:.2e}")
+
+# 用最优 LOOKBACK 重新构建最终训练/测试数据
+X_tr_std, y_tr, X_te_std, y_te = build_windows(LOOKBACK)
+print(f"最终数据: train={X_tr_std.shape}, test={X_te_std.shape}")
+
+# 90/10 train/val split（来自训练窗口，用于 early stopping）
+n_tr_total = len(X_tr_std)
+rng    = np.random.RandomState(42)
+va_idx = rng.choice(n_tr_total, size=int(n_tr_total * 0.1), replace=False)
+tr_idx = np.setdiff1d(np.arange(n_tr_total), va_idx)
+
+tr_loader = DataLoader(TemporalDataset(X_tr_std[tr_idx], y_tr[tr_idx]),
+                       batch_size=batch_size, shuffle=True,  num_workers=0)
+va_loader = DataLoader(TemporalDataset(X_tr_std[va_idx], y_tr[va_idx]),
+                       batch_size=batch_size, shuffle=False, num_workers=0)
+
+====================================================================================================
+[CODE CELL 10]
+
+# ---- Temporal-LSTM LOYO 留一年交叉验证 ----
+# 使用最优超参数（LOOKBACK/hidden/layers/dropout/lr/wd），逐年留出评估
+LOYO_EPOCHS   = 200   # 每折最大训练轮数（early stopping 通常提前结束）
+LOYO_PATIENCE = 20    # early stopping patience
+
+loyo_years = list(range(2000 + LOOKBACK, 2020))   # 有效目标年
+print(f"[Temporal-LSTM LOYO] LOOKBACK={LOOKBACK}，评估年份: {loyo_years}（共 {len(loyo_years)} fold）")
+
+
+def build_windows_loyo(lookback, hold_out_year):
+    """LOYO 版本：训练集 = 除 hold_out_year 以外所有目标年，测试集 = hold_out_year。"""
+    WINDOW = lookback + 1
+    wx, wy, wyear = [], [], []
+    for g in np.unique(rgiid_sorted):
+        mask  = rgiid_sorted == g
+        Xg    = X_sorted[mask]; yg = y_sorted[mask]; yrs = year_sorted[mask]
+        order = np.argsort(yrs)
+        Xg, yg, yrs = Xg[order], yg[order], yrs[order]
+        for i in range(len(yrs) - WINDOW + 1):
+            wx.append(Xg[i : i + lookback])
+            wy.append(float(yg[i + lookback]))
+            wyear.append(int(yrs[i + lookback]))
+    wx    = np.stack(wx, axis=0)
+    wy    = np.array(wy,    dtype=np.float32)
+    wyear = np.array(wyear, dtype=int)
+    tr_mask = wyear != hold_out_year
+    te_mask = wyear == hold_out_year
+    X_tr_r, y_tr_ = wx[tr_mask], wy[tr_mask]
+    X_te_r, y_te_ = wx[te_mask], wy[te_mask]
+    if len(X_te_r) == 0:
+        return None
+    n_tr, L, F = X_tr_r.shape
+    sc = StandardScaler()
+    X_tr_s = sc.fit_transform(X_tr_r.reshape(-1, F)).reshape(n_tr, L, F)
+    n_te   = X_te_r.shape[0]
+    X_te_s = sc.transform(X_te_r.reshape(-1, F)).reshape(n_te, L, F)
+    return X_tr_s, y_tr_, X_te_s, y_te_
+
+
+loyo_records = []
+all_y_true_loyo, all_y_pred_loyo = [], []   # OOF 收集
+for yi, yr in enumerate(loyo_years):
+    result = build_windows_loyo(LOOKBACK, yr)
+    if result is None:
+        print(f"  [SKIP] year {yr}: no test windows")
+        continue
+    X_tr_l, y_tr_l, X_te_l, y_te_l = result
+
+    # 10% val split for early stopping
+    n_tr_l   = len(X_tr_l)
+    rng_l    = np.random.RandomState(42)
+    va_idx_l = rng_l.choice(n_tr_l, size=int(n_tr_l * 0.1), replace=False)
+    tr_idx_l = np.setdiff1d(np.arange(n_tr_l), va_idx_l)
+
+    tr_ldr_l = DataLoader(TemporalDataset(X_tr_l[tr_idx_l], y_tr_l[tr_idx_l]),
+                          batch_size=512, shuffle=True,  num_workers=0)
+
+    setup_seed(42)
+    m_loyo = TemporalLSTMModel(X_tr_l.shape[-1], lstm_hidden, lstm_layers, dropout).to(device)
+    opt_l  = torch.optim.Adam(m_loyo.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch_l  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_l, patience=5, factor=0.5)
+    crit_l = nn.MSELoss()
+
+    best_va_r2_l, pat_l, best_state_l = float("-inf"), 0, None
+    for ep in range(1, LOYO_EPOCHS + 1):
+        m_loyo.train()
+        for X_b, y_b in tr_ldr_l:
+            out  = m_loyo(X_b.to(device))
+            loss = crit_l(out, y_b.to(device))
+            opt_l.zero_grad(); loss.backward(); opt_l.step()
+        m_loyo.eval()
+        va_preds = predict_temporal(m_loyo, X_tr_l[va_idx_l])
+        va_r2_l  = r2_score(y_tr_l[va_idx_l], va_preds)
+        sch_l.step(-va_r2_l)
+        if va_r2_l > best_va_r2_l:
+            best_va_r2_l = va_r2_l; pat_l = 0
+            best_state_l = {k: v.cpu().clone() for k, v in m_loyo.state_dict().items()}
+        else:
+            pat_l += 1
+        if pat_l >= LOYO_PATIENCE:
+            break
+
+    m_loyo.load_state_dict(best_state_l)
+    y_pred_l = predict_temporal(m_loyo, X_te_l)
+
+    all_y_true_loyo.extend(y_te_l.tolist())
+    all_y_pred_loyo.extend(y_pred_l.tolist())
+
+    r2_l     = r2_score(y_te_l, y_pred_l)
+    rmse_l   = float(np.sqrt(mean_squared_error(y_te_l, y_pred_l)))
+    mae_l    = float(mean_absolute_error(y_te_l, y_pred_l))
+    loyo_records.append({"year": yr, "R2": round(r2_l, 4), "RMSE": round(rmse_l, 4), "MAE": round(mae_l, 4)})
+    print(f"  [{yi+1:2d}/{len(loyo_years)}] year={yr} | R²={r2_l:.4f}  RMSE={rmse_l:.4f}  MAE={mae_l:.4f}")
+
+loyo_df_tlstm = pd.DataFrame(loyo_records)
+csv_path_l    = os.path.join(outputs_dir, "temporal_lstm_loyo_results.csv")
+loyo_df_tlstm.to_csv(csv_path_l, index=False)
+print(f"\n[Temporal-LSTM LOYO] 结果已保存: {csv_path_l}")
+print(f"平均 R²={loyo_df_tlstm['R2'].mean():.4f}  RMSE={loyo_df_tlstm['RMSE'].mean():.4f}  MAE={loyo_df_tlstm['MAE'].mean():.4f}")
+print(loyo_df_tlstm.to_string(index=False))
+
+# ---- 逐年 R²/RMSE 折线图 ----
+fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=100)
+axes[0].plot(loyo_df_tlstm["year"], loyo_df_tlstm["R2"],   marker="o", linewidth=2)
+axes[0].set_title("Temporal-LSTM LOYO — Per-Year R²")
+axes[0].set_xlabel("Held-out Year"); axes[0].set_ylabel("R²"); axes[0].grid(True, alpha=0.3)
+axes[1].plot(loyo_df_tlstm["year"], loyo_df_tlstm["RMSE"], marker="s", linewidth=2, color="orange")
+axes[1].set_title("Temporal-LSTM LOYO — Per-Year RMSE")
+axes[1].set_xlabel("Held-out Year"); axes[1].set_ylabel("RMSE (m/yr)"); axes[1].grid(True, alpha=0.3)
+plt.tight_layout(); plt.show(); plt.close()
+
+# ---- OOF 散点图（Bolibar et al. 2020 Figure 9 风格） ----
+all_y_true_np = np.array(all_y_true_loyo)
+all_y_pred_np = np.array(all_y_pred_loyo)
+r2_oof   = float(r2_score(all_y_true_np, all_y_pred_np))
+rmse_oof = float(np.sqrt(mean_squared_error(all_y_true_np, all_y_pred_np)))
+mae_oof  = float(mean_absolute_error(all_y_true_np, all_y_pred_np))
+
+fig, ax = plt.subplots(figsize=(7, 7), dpi=100)
+ax.scatter(all_y_true_np, all_y_pred_np, alpha=0.15, s=8, c="steelblue")
+lims = [float(all_y_true_np.min()), float(all_y_true_np.max())]
+ax.plot(lims, lims, "r--", linewidth=1.5)
+ax.set_xlabel("Observed dhdt (m/yr)", fontsize=13)
+ax.set_ylabel("Predicted dhdt (m/yr)", fontsize=13)
+ax.set_title(f"LOYO Out-of-Fold Predictions (Temporal-LSTM)\n"
+             f"R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}", fontsize=13)
+plt.tight_layout()
+plt.show()
+plt.close()
+print(f"[LOYO-TLSTM OOF] R²={r2_oof:.4f}  RMSE={rmse_oof:.4f}  MAE={mae_oof:.4f}  n={len(all_y_true_np)}")
+
+====================================================================================================
+[CODE CELL 11]
+
+from sklearn.model_selection import GroupKFold
+
+CV_EPOCHS   = 200
+CV_PATIENCE = 20
+
+# ── 辅助函数：冰川/年份折编号 ──────────────────────────────────────────
+def make_glacier_fold(rgiid_arr, n_folds=5):
+    glacier_sorted = np.sort(np.unique(rgiid_arr))
+    n_glaciers = len(glacier_sorted)
+    gid_to_fold = {gid: int(i * n_folds // n_glaciers)
+                   for i, gid in enumerate(glacier_sorted)}
+    return np.array([gid_to_fold[g] for g in rgiid_arr], dtype=int)
+
+def make_year_fold(year_arr, n_folds=5):
+    year_sorted = np.sort(np.unique(year_arr))
+    n_years = len(year_sorted)
+    yr_to_fold = {yr: int(i * n_folds // n_years)
+                  for i, yr in enumerate(year_sorted)}
+    return np.array([yr_to_fold[y] for y in year_arr], dtype=int)
+
+
+def build_windows_for_cv(lookback):
+    """构建全量滑动窗口（不限制目标年），同时返回目标冰川 ID 和目标年供 CV 分组。"""
+    WINDOW = lookback + 1
+    wx, wy, w_rgiid, w_year = [], [], [], []
+    for g in np.unique(rgiid_sorted):
+        mask = rgiid_sorted == g
+        Xg = X_sorted[mask]; yg = y_sorted[mask]; yrs = year_sorted[mask]
+        order = np.argsort(yrs)
+        Xg, yg, yrs = Xg[order], yg[order], yrs[order]
+        for i in range(len(yrs) - WINDOW + 1):
+            wx.append(Xg[i : i + lookback])
+            wy.append(float(yg[i + lookback]))
+            w_rgiid.append(g)
+            w_year.append(int(yrs[i + lookback]))
+    wx      = np.stack(wx, axis=0)                    # [N, lookback, 33]
+    wy      = np.array(wy,      dtype=np.float32)
+    w_rgiid = np.array(w_rgiid)
+    w_year  = np.array(w_year,  dtype=int)
+    return wx, wy, w_rgiid, w_year
+
+
+def train_fold_tlstm(X_tr_s, y_tr, X_te_s, y_te, fold_label):
+    """训练一折 Temporal-LSTM，返回 (r2, rmse, mae)"""
+    n_tr = len(X_tr_s)
+    rng_ = np.random.RandomState(42)
+    va_i = rng_.choice(n_tr, size=int(n_tr * 0.1), replace=False)
+    tr_i = np.setdiff1d(np.arange(n_tr), va_i)
+
+    tr_ldr = DataLoader(TemporalDataset(X_tr_s[tr_i], y_tr[tr_i]),
+                        batch_size=512, shuffle=True, num_workers=0)
+    setup_seed(42)
+    m    = TemporalLSTMModel(X_tr_s.shape[-1], lstm_hidden, lstm_layers, dropout).to(device)
+    opt_ = torch.optim.Adam(m.parameters(), lr=learning_rate, weight_decay=weight_decay_val)
+    sch_ = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_, patience=5, factor=0.5)
+    crit_= nn.MSELoss()
+
+    best_va, pat_, best_st = float("-inf"), 0, None
+    for ep in range(1, CV_EPOCHS + 1):
+        m.train()
+        for X_b, y_b in tr_ldr:
+            out  = m(X_b.to(device))
+            loss = crit_(out, y_b.to(device))
+            opt_.zero_grad(); loss.backward(); opt_.step()
+        va_preds = predict_temporal(m, X_tr_s[va_i])
+        va_r2    = r2_score(y_tr[va_i], va_preds)
+        sch_.step(-va_r2)
+        if va_r2 > best_va:
+            best_va = va_r2; pat_ = 0
+            best_st = {k: v.cpu().clone() for k, v in m.state_dict().items()}
+        else:
+            pat_ += 1
+        if pat_ >= CV_PATIENCE:
+            print(f"  {fold_label}: early stop @ epoch {ep}, val R²={best_va:.4f}")
+            break
+    m.load_state_dict(best_st)
+    y_pred = predict_temporal(m, X_te_s)
+    r2   = float(r2_score(y_te, y_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_te, y_pred)))
+    mae  = float(mean_absolute_error(y_te, y_pred))
+    return r2, rmse, mae
+
+
+# ── 构建全量 CV 窗口 ───────────────────────────────────────────────────
+wx_all_cv, wy_all_cv, w_rgiid_cv, w_year_cv = build_windows_for_cv(LOOKBACK)
+n_cv, L_cv, F_cv = wx_all_cv.shape
+print(f"CV 全量窗口: {wx_all_cv.shape}")
+
+# ── 5-fold 空间 GroupKFold CV ─────────────────────────────────────────
+gkf_cv = GroupKFold(n_splits=5)
+spatial_rows = []
+
+for fold_i, (tr_idx, te_idx) in enumerate(
+        gkf_cv.split(wx_all_cv, wy_all_cv, groups=w_rgiid_cv), 1):
+
+    assert len(set(w_rgiid_cv[tr_idx]) & set(w_rgiid_cv[te_idx])) == 0, \
+        f"Fold {fold_i}: spatial leakage detected!"
+
+    X_tr_raw = wx_all_cv[tr_idx]; y_tr_ = wy_all_cv[tr_idx]
+    X_te_raw = wx_all_cv[te_idx]; y_te_ = wy_all_cv[te_idx]
+    n_tr_f   = len(X_tr_raw)
+
+    sc = StandardScaler()
+    X_tr_s = sc.fit_transform(X_tr_raw.reshape(-1, F_cv)).reshape(n_tr_f, L_cv, F_cv)
+    X_te_s = sc.transform(X_te_raw.reshape(-1, F_cv)).reshape(len(X_te_raw), L_cv, F_cv)
+
+    print(f"\n[TLSTM Spatial CV] Fold {fold_i}/5 | n_train={n_tr_f} | n_test={len(te_idx)}")
+    r2, rmse, mae = train_fold_tlstm(X_tr_s, y_tr_, X_te_s, y_te_, f"Fold{fold_i}")
+    n_test_glaciers = len(np.unique(w_rgiid_cv[te_idx]))
+
+    spatial_rows.append({
+        "fold": fold_i, "n_train": n_tr_f, "n_test": len(te_idx),
+        "n_test_glaciers": n_test_glaciers, "R2": r2, "RMSE": rmse, "MAE": mae,
+    })
+    print(f"[TLSTM Spatial CV] Fold {fold_i}/5 | glaciers={n_test_glaciers} | "
+          f"R2={r2:.4f} | RMSE={rmse:.4f} | MAE={mae:.4f}")
+
+spatial_df = pd.DataFrame(spatial_rows)
+sp_path = os.path.join(outputs_dir, "temporal_lstm_spatial_cv_results.csv")
+spatial_df.to_csv(sp_path, index=False)
+
+print(f"\n[TLSTM Spatial CV] ===== Summary =====")
+print(f"  R²   mean={spatial_df['R2'].mean():.4f}  std={spatial_df['R2'].std():.4f}")
+print(f"  RMSE mean={spatial_df['RMSE'].mean():.4f}  std={spatial_df['RMSE'].std():.4f}")
+print(f"  MAE  mean={spatial_df['MAE'].mean():.4f}  std={spatial_df['MAE'].std():.4f}")
+print(f"  Saved → {sp_path}")
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), dpi=100)
+for ax, metric, color in zip(axes, ["R2", "RMSE", "MAE"],
+                              ["steelblue", "darkorange", "seagreen"]):
+    vals = spatial_df[metric]
+    ax.bar(spatial_df["fold"], vals, color=color, alpha=0.8)
+    ax.axhline(vals.mean(), color="r", linestyle="--", label=f"Mean={vals.mean():.4f}")
+    ax.set_xlabel("Fold", fontsize=12); ax.set_ylabel(metric, fontsize=12)
+    ax.set_title(f"Temporal-LSTM Spatial CV — {metric}", fontsize=13); ax.legend()
+plt.tight_layout(); plt.show(); plt.close()
+
+====================================================================================================

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "WebFetch(domain:www.researchgate.net)",
+      "WebFetch(domain:agupubs.onlinelibrary.wiley.com)",
+      "WebFetch(domain:tugraz.elsevierpure.com)",
+      "WebSearch"
+    ]
+  }
+}
