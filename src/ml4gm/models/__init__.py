@@ -11,6 +11,10 @@ def create_model(name: str, parameters: dict[str, Any], seed: int) -> ModelAdapt
         from ml4gm.models.lightgbm import LightGBMAdapter
 
         return LightGBMAdapter(parameters, seed)
+    if name == "mlp":
+        from ml4gm.models.mlp import MLPAdapter
+
+        return MLPAdapter(parameters, seed)
     raise ValueError(f"Unsupported or unavailable model: {name}")
 
 
