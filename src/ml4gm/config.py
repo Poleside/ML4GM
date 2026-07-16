@@ -51,7 +51,10 @@ class RunConfig:
 
     @classmethod
     def from_yaml(cls, path: Path) -> RunConfig:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"Invalid YAML in configuration file: {path}") from exc
         try:
             model_name = str(raw["model"]["name"])
             strategy = str(raw["validation"]["strategy"])
