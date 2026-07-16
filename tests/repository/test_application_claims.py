@@ -79,8 +79,7 @@ def test_scientific_scale_claims_are_tied_to_legacy_evidence() -> None:
 
 def test_drafts_do_not_claim_adoption() -> None:
     combined = (
-        CODEX_FOR_OSS.read_text(encoding="utf-8")
-        + OPEN_SOURCE_FUND.read_text(encoding="utf-8")
+        CODEX_FOR_OSS.read_text(encoding="utf-8") + OPEN_SOURCE_FUND.read_text(encoding="utf-8")
     ).lower()
     for unsupported_claim in [
         "widely adopted",
