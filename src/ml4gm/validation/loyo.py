@@ -9,6 +9,8 @@ class Split:
     fold: str
     train: NDArray[np.int_]
     test: NDArray[np.int_]
+    strategy: str = ""
+    held_out_years: tuple[object, ...] = ()
 
 
 def loyo_splits(years: NDArray) -> list[Split]:
@@ -19,5 +21,13 @@ def loyo_splits(years: NDArray) -> list[Split]:
         train = np.flatnonzero(values != held_out)
         if len(train) == 0 or len(test) == 0:
             raise ValueError(f"Year {held_out} produced an empty fold")
-        splits.append(Split(f"year-{held_out}", train, test))
+        splits.append(
+            Split(
+                f"year-{held_out}",
+                train,
+                test,
+                strategy="loyo",
+                held_out_years=(held_out,),
+            )
+        )
     return splits

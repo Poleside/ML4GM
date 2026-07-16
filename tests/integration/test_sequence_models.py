@@ -111,13 +111,49 @@ def test_temporal_loyo_removes_training_windows_containing_held_out_target_rows(
     assert 2002 not in data.context_years[filtered]
 
 
+def test_temporal_loyo_filters_held_out_year_from_unbalanced_glacier_context() -> None:
+    frame = pd.DataFrame(
+        {
+            "rgiid": ["A"] * 6 + ["B"] * 6,
+            "year": list(range(2000, 2006)) + list(range(2001, 2007)),
+            "dhdt": range(12),
+            "x": range(12),
+        }
+    )
+    data = build_temporal_sequences(frame, ["x"], 2, "rgiid", "year", "dhdt")
+    split = next(
+        split
+        for split in __import__("ml4gm.validation", fromlist=["loyo_splits"]).loyo_splits(
+            data.years
+        )
+        if split.fold == "year-2002"
+    )
+    assert ("B", 2002) not in set(
+        zip(
+            data.glacier_ids[split.test].tolist(),
+            data.years[split.test].tolist(),
+            strict=True,
+        )
+    )
+
+    filtered = _filter_temporal_train_indices(data, split)
+
+    assert not any(
+        glacier == "B" and target_year == 2003
+        for glacier, target_year in zip(
+            data.glacier_ids[filtered], data.years[filtered], strict=True
+        )
+    )
+    assert 2002 not in data.context_years[filtered]
+
+
 def test_temporal_block_removes_training_windows_containing_test_target_rows() -> None:
     frame = pd.DataFrame(
         {
-            "rgiid": ["A"] * 5 + ["B"] * 5,
-            "year": [2000, 2001, 2002, 2003, 2004] * 2,
-            "dhdt": range(10),
-            "x": range(10),
+            "rgiid": ["A"] * 8 + ["B"] * 8,
+            "year": list(range(2000, 2008)) * 2,
+            "dhdt": range(16),
+            "x": range(16),
         }
     )
     data = build_temporal_sequences(frame, ["x"], 2, "rgiid", "year", "dhdt")
@@ -148,6 +184,31 @@ def test_temporal_block_removes_training_windows_containing_test_target_rows() -
     }
 
     assert train_context.isdisjoint(test_targets)
+
+
+def test_temporal_block_filters_entire_held_out_year_group_from_context() -> None:
+    frame = pd.DataFrame(
+        {
+            "rgiid": ["A"] * 6 + ["B"] * 5 + ["C"] * 6 + ["D"] * 6,
+            "year": list(range(2000, 2006))
+            + [2000, 2001, 2003, 2004, 2005]
+            + list(range(2000, 2006)) * 2,
+            "dhdt": range(23),
+            "x": range(23),
+        }
+    )
+    data = build_temporal_sequences(frame, ["x"], 1, "rgiid", "year", "dhdt")
+    splits = __import__("ml4gm.validation", fromlist=["block_splits"]).block_splits(
+        data.glacier_ids,
+        data.years,
+        folds=2,
+        year_universe=frame["year"].to_numpy(),
+    )
+    split = next(item for item in splits if item.fold == "block-0")
+
+    filtered = _filter_temporal_train_indices(data, split)
+
+    assert set(data.context_years[filtered].reshape(-1)).isdisjoint(split.held_out_years)
 
 
 def test_temporal_runner_scales_only_filtered_training_windows(

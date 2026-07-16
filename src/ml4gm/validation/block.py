@@ -13,11 +13,18 @@ def _group_map(values: NDArray, folds: int) -> dict[object, int]:
     }
 
 
-def block_splits(glacier_ids: NDArray, years: NDArray, folds: int = 5) -> list[Split]:
+def block_splits(
+    glacier_ids: NDArray,
+    years: NDArray,
+    folds: int = 5,
+    *,
+    year_universe: NDArray | None = None,
+) -> list[Split]:
     glaciers = np.asarray(glacier_ids)
     year_values = np.asarray(years)
     glacier_groups = _group_map(glaciers, folds)
-    year_groups = _group_map(year_values, folds)
+    all_years = year_values if year_universe is None else np.asarray(year_universe)
+    year_groups = _group_map(all_years, folds)
     result: list[Split] = []
     for fold in range(folds):
         test_mask = np.array(
@@ -36,5 +43,14 @@ def block_splits(glacier_ids: NDArray, years: NDArray, folds: int = 5) -> list[S
         test = np.flatnonzero(test_mask)
         if len(train) == 0 or len(test) == 0:
             raise ValueError(f"Block {fold} produced an empty fold")
-        result.append(Split(f"block-{fold}", train, test))
+        held_out_years = tuple(year for year, group in year_groups.items() if group == fold)
+        result.append(
+            Split(
+                f"block-{fold}",
+                train,
+                test,
+                strategy="block",
+                held_out_years=held_out_years,
+            )
+        )
     return result

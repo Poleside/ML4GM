@@ -34,12 +34,22 @@ def _splits(config: RunConfig, frame: pd.DataFrame) -> list[Split]:
     )
 
 
-def _sequence_splits(config: RunConfig, glacier_ids: np.ndarray, years: np.ndarray) -> list[Split]:
+def _sequence_splits(
+    config: RunConfig,
+    glacier_ids: np.ndarray,
+    years: np.ndarray,
+    source_years: np.ndarray | None = None,
+) -> list[Split]:
     if config.validation.strategy == "loyo":
         return loyo_splits(years)
     if config.validation.strategy == "spatial":
         return spatial_splits(glacier_ids, config.validation.folds, config.random_seed)
-    return block_splits(glacier_ids, years, config.validation.folds)
+    return block_splits(
+        glacier_ids,
+        years,
+        config.validation.folds,
+        year_universe=source_years,
+    )
 
 
 def _scale_sequence(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -52,29 +62,16 @@ def _scale_sequence(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np
 
 
 def _filter_temporal_train_indices(data: SequenceData, split: Split) -> np.ndarray:
-    test_targets = set(
-        zip(
-            data.glacier_ids[split.test].tolist(),
-            data.years[split.test].tolist(),
-            strict=True,
-        )
-    )
+    forbidden_years = set(split.held_out_years)
     retained = [
         index
         for index in split.train
-        if all(
-            pair not in test_targets
-            for pair in zip(
-                data.context_glacier_ids[index].tolist(),
-                data.context_years[index].tolist(),
-                strict=True,
-            )
-        )
+        if forbidden_years.isdisjoint(data.context_years[index].tolist())
     ]
     if not retained:
         raise ValueError(
             f"{split.fold} has no temporal training windows after removing "
-            "test target rows from training context"
+            f"{split.strategy} held-out years from training context"
         )
     return np.asarray(retained, dtype=int)
 
@@ -92,7 +89,12 @@ def _run_seasonal(config: RunConfig, frame: pd.DataFrame) -> RunResult:
         config.data.year,
     )
     results: list[FoldResult] = []
-    for split in _sequence_splits(config, data.glacier_ids, data.years):
+    for split in _sequence_splits(
+        config,
+        data.glacier_ids,
+        data.years,
+        frame[config.data.year].to_numpy(),
+    ):
         sequence_train, sequence_test = _scale_sequence(
             data.sequence[split.train], data.sequence[split.test]
         )
@@ -142,7 +144,12 @@ def _run_temporal(config: RunConfig, frame: pd.DataFrame) -> RunResult:
         config.data.target,
     )
     results: list[FoldResult] = []
-    for split in _sequence_splits(config, data.glacier_ids, data.years):
+    for split in _sequence_splits(
+        config,
+        data.glacier_ids,
+        data.years,
+        frame[config.data.year].to_numpy(),
+    ):
         train = _filter_temporal_train_indices(data, split)
         sequence_train, sequence_test = _scale_sequence(
             data.sequence[train], data.sequence[split.test]

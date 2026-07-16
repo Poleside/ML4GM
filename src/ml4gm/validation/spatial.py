@@ -14,6 +14,11 @@ def spatial_splits(glacier_ids: NDArray, folds: int = 5, seed: int = 42) -> list
     splitter = GroupKFold(n_splits=folds)
     placeholder = np.zeros(len(groups))
     return [
-        Split(f"spatial-{index}", train.astype(int), test.astype(int))
+        Split(
+            f"spatial-{index}",
+            train.astype(int),
+            test.astype(int),
+            strategy="spatial",
+        )
         for index, (train, test) in enumerate(splitter.split(placeholder, groups=groups))
     ]

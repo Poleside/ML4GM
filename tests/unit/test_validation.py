@@ -10,6 +10,8 @@ def test_loyo_isolates_each_year() -> None:
     splits = loyo_splits(years)
 
     assert [split.fold for split in splits] == ["year-2000", "year-2001"]
+    assert [split.strategy for split in splits] == ["loyo", "loyo"]
+    assert [split.held_out_years for split in splits] == [(2000,), (2001,)]
     for split in splits:
         assert set(years[split.train]).isdisjoint(set(years[split.test]))
 
@@ -41,6 +43,11 @@ def test_block_splits_isolate_glacier_and_year_groups() -> None:
     splits = block_splits(glaciers, years, folds=2)
 
     assert [split.fold for split in splits] == ["block-0", "block-1"]
+    assert [split.strategy for split in splits] == ["block", "block"]
+    assert [split.held_out_years for split in splits] == [
+        (2000, 2001),
+        (2002, 2003),
+    ]
     for split in splits:
         assert set(glaciers[split.train]).isdisjoint(set(glaciers[split.test]))
         assert set(years[split.train]).isdisjoint(set(years[split.test]))
