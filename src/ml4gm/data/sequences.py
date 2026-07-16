@@ -15,6 +15,8 @@ class SequenceData:
     target: NDArray[np.float64]
     glacier_ids: NDArray
     years: NDArray[np.int_]
+    context_glacier_ids: NDArray
+    context_years: NDArray[np.int_]
 
 
 def _require_columns(frame: pd.DataFrame, columns: list[str], kind: str) -> None:
@@ -48,6 +50,20 @@ def _validate_feature_names(
         raise ValueError(f"Features must not include {' or '.join(labels)}")
 
 
+def _validate_row_identity(
+    frame: pd.DataFrame, glacier_id: str, year: str, kind: str
+) -> NDArray[np.int_]:
+    if frame.empty:
+        raise ValueError(f"{kind} frame must be non-empty")
+    years = pd.to_numeric(frame[year], errors="raise").to_numpy(dtype=float)
+    _finite(years, f"{kind} years")
+    if not np.equal(years, np.floor(years)).all():
+        raise ValueError(f"{kind} years must be integers")
+    if frame.duplicated([glacier_id, year]).any():
+        raise ValueError(f"{kind} glacier-year rows must be unique")
+    return years.astype(int)
+
+
 def build_seasonal_sequences(
     frame: pd.DataFrame,
     monthly_variables: list[str],
@@ -75,13 +91,13 @@ def build_seasonal_sequences(
         "seasonal",
     )
     _require_columns(frame, [*static_features, target, glacier_id, year], "seasonal")
+    years = _validate_row_identity(frame, glacier_id, year, "Seasonal")
     sequence = np.stack(
         [frame[columns].to_numpy(dtype=float) for columns in monthly_columns],
         axis=1,
     )
     static = frame[static_features].to_numpy(dtype=float)
     targets = frame[target].to_numpy(dtype=float)
-    years = frame[year].to_numpy(dtype=int)
     _finite(sequence, "Seasonal sequence")
     _finite(static, "Seasonal static features")
     _finite(targets, "Seasonal target")
@@ -91,6 +107,8 @@ def build_seasonal_sequences(
         target=targets,
         glacier_ids=frame[glacier_id].to_numpy(),
         years=years,
+        context_glacier_ids=np.empty((len(frame), 0), dtype=object),
+        context_years=np.empty((len(frame), 0), dtype=int),
     )
 
 
@@ -110,22 +128,19 @@ def build_temporal_sequences(
     _require_columns(frame, [*feature_columns, glacier_id, year, target], "temporal")
     feature_values = frame[feature_columns].to_numpy(dtype=float)
     target_values = frame[target].to_numpy(dtype=float)
-    year_values = pd.to_numeric(frame[year], errors="raise").to_numpy(dtype=float)
+    _validate_row_identity(frame, glacier_id, year, "Temporal")
     _finite(feature_values, "Temporal features")
     _finite(target_values, "Temporal target")
-    _finite(year_values, "Temporal years")
-    if not np.equal(year_values, np.floor(year_values)).all():
-        raise ValueError("Temporal years must be integers")
 
     sequences: list[NDArray[np.float64]] = []
     targets: list[float] = []
     glaciers: list[object] = []
     years: list[int] = []
+    context_glaciers: list[NDArray] = []
+    context_years: list[NDArray[np.int_]] = []
     ordered_frame = frame.sort_values([glacier_id, year], kind="stable")
     for glacier, group in ordered_frame.groupby(glacier_id, sort=False):
         ordered = group.reset_index(drop=True)
-        if ordered[year].duplicated().any():
-            raise ValueError("Temporal glacier-year rows must be unique")
         for end in range(int(lookback), len(ordered)):
             start = end - int(lookback)
             observed = ordered.loc[start:end, year].to_numpy(dtype=int)
@@ -136,6 +151,8 @@ def build_temporal_sequences(
             targets.append(float(ordered.iloc[end][target]))
             glaciers.append(glacier)
             years.append(int(ordered.iloc[end][year]))
+            context_glaciers.append(np.full(int(lookback), glacier, dtype=object))
+            context_years.append(ordered.iloc[start:end][year].to_numpy(dtype=int))
     if not sequences:
         raise ValueError("No valid temporal sequences were produced")
     sequence = np.stack(sequences)
@@ -145,4 +162,6 @@ def build_temporal_sequences(
         target=np.asarray(targets, dtype=float),
         glacier_ids=np.asarray(glaciers),
         years=np.asarray(years, dtype=int),
+        context_glacier_ids=np.stack(context_glaciers),
+        context_years=np.stack(context_years),
     )

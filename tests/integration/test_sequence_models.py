@@ -5,7 +5,7 @@ import pytest
 
 from ml4gm.config import DataConfig, ModelConfig, RunConfig, ValidationConfig
 from ml4gm.data.sequences import build_temporal_sequences
-from ml4gm.evaluation.runner import run_evaluation
+from ml4gm.evaluation.runner import _filter_temporal_train_indices, run_evaluation
 from ml4gm.validation import spatial_splits
 
 pytest.importorskip("torch")
@@ -85,3 +85,112 @@ def test_temporal_spatial_groups_and_runner(tmp_path: Path) -> None:
 
     assert len(result.folds) == 2
     assert (config.data.output_dir / "result.json").exists()
+
+
+def test_temporal_loyo_removes_training_windows_containing_held_out_target_rows() -> None:
+    frame = pd.DataFrame(
+        {
+            "rgiid": ["A"] * 6 + ["B"] * 6,
+            "year": [2000, 2001, 2002, 2003, 2004, 2005] * 2,
+            "dhdt": range(12),
+            "x": [0.0, 1.0, 2002.0, 3.0, 4.0, 5.0] + [10.0, 11.0, 2002.0, 13.0, 14.0, 15.0],
+        }
+    )
+    data = build_temporal_sequences(frame, ["x"], 2, "rgiid", "year", "dhdt")
+    held_out = next(
+        split
+        for split in __import__("ml4gm.validation", fromlist=["loyo_splits"]).loyo_splits(
+            data.years
+        )
+        if split.fold == "year-2002"
+    )
+
+    filtered = _filter_temporal_train_indices(data, held_out)
+
+    assert data.years[filtered].tolist() == [2005, 2005]
+    assert 2002 not in data.context_years[filtered]
+
+
+def test_temporal_block_removes_training_windows_containing_test_target_rows() -> None:
+    frame = pd.DataFrame(
+        {
+            "rgiid": ["A"] * 5 + ["B"] * 5,
+            "year": [2000, 2001, 2002, 2003, 2004] * 2,
+            "dhdt": range(10),
+            "x": range(10),
+        }
+    )
+    data = build_temporal_sequences(frame, ["x"], 2, "rgiid", "year", "dhdt")
+    split = next(
+        split
+        for split in __import__("ml4gm.validation", fromlist=["block_splits"]).block_splits(
+            data.glacier_ids, data.years, folds=2
+        )
+        if split.fold == "block-0"
+    )
+
+    filtered = _filter_temporal_train_indices(data, split)
+    test_targets = set(
+        zip(
+            data.glacier_ids[split.test].tolist(),
+            data.years[split.test].tolist(),
+            strict=True,
+        )
+    )
+    train_context = {
+        pair
+        for index in filtered
+        for pair in zip(
+            data.context_glacier_ids[index].tolist(),
+            data.context_years[index].tolist(),
+            strict=True,
+        )
+    }
+
+    assert train_context.isdisjoint(test_targets)
+
+
+def test_temporal_runner_scales_only_filtered_training_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "rgiid": ["A"] * 6 + ["B"] * 6,
+            "year": [2000, 2001, 2002, 2003, 2004, 2005] * 2,
+            "dhdt": range(12),
+            "x": [0.0, 1.0, 2002.0, 3.0, 4.0, 5.0] + [10.0, 11.0, 2002.0, 13.0, 14.0, 15.0],
+        }
+    )
+    input_path = tmp_path / "loyo.csv"
+    frame.to_csv(input_path, index=False)
+    seen_train: list[list[float]] = []
+
+    def spy_scale(train: object, test: object) -> tuple[object, object]:
+        seen_train.append(train.reshape(-1).tolist())
+        return train, test
+
+    class FakeModel:
+        def fit_inputs(self, sequence: object, target: object) -> None:
+            return None
+
+        def predict_inputs(self, sequence: object) -> object:
+            return __import__("numpy").zeros(len(sequence))
+
+    runner = __import__("ml4gm.evaluation.runner", fromlist=["_scale_sequence"])
+    monkeypatch.setattr(runner, "_scale_sequence", spy_scale)
+    monkeypatch.setattr(runner, "create_model", lambda *args: FakeModel())
+    config = RunConfig(
+        data=DataConfig(input_path, output_dir=tmp_path / "output"),
+        model=ModelConfig(
+            "temporal_lstm",
+            {"feature_columns": ["x"], "lookback": 2, "epochs": 1},
+        ),
+        validation=ValidationConfig("loyo", 2),
+        random_seed=42,
+        run_name="loyo-filter",
+    )
+
+    run_evaluation(config)
+
+    held_out_2002_train = seen_train[0]
+    assert 2002.0 not in held_out_2002_train

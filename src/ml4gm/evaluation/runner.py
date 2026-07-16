@@ -7,7 +7,11 @@ from sklearn.preprocessing import StandardScaler
 from ml4gm.config import RunConfig
 from ml4gm.data.preprocessing import prepare_fold
 from ml4gm.data.schema import validate_annual_table
-from ml4gm.data.sequences import build_seasonal_sequences, build_temporal_sequences
+from ml4gm.data.sequences import (
+    SequenceData,
+    build_seasonal_sequences,
+    build_temporal_sequences,
+)
 from ml4gm.evaluation.metrics import regression_metrics
 from ml4gm.evaluation.results import FoldResult, RunResult
 from ml4gm.models import create_model
@@ -45,6 +49,34 @@ def _scale_sequence(train: np.ndarray, test: np.ndarray) -> tuple[np.ndarray, np
     train_scaled = scaler.fit_transform(train.reshape(-1, train_shape[-1])).reshape(train_shape)
     test_scaled = scaler.transform(test.reshape(-1, test_shape[-1])).reshape(test_shape)
     return train_scaled, test_scaled
+
+
+def _filter_temporal_train_indices(data: SequenceData, split: Split) -> np.ndarray:
+    test_targets = set(
+        zip(
+            data.glacier_ids[split.test].tolist(),
+            data.years[split.test].tolist(),
+            strict=True,
+        )
+    )
+    retained = [
+        index
+        for index in split.train
+        if all(
+            pair not in test_targets
+            for pair in zip(
+                data.context_glacier_ids[index].tolist(),
+                data.context_years[index].tolist(),
+                strict=True,
+            )
+        )
+    ]
+    if not retained:
+        raise ValueError(
+            f"{split.fold} has no temporal training windows after removing "
+            "test target rows from training context"
+        )
+    return np.asarray(retained, dtype=int)
 
 
 def _run_seasonal(config: RunConfig, frame: pd.DataFrame) -> RunResult:
@@ -111,16 +143,17 @@ def _run_temporal(config: RunConfig, frame: pd.DataFrame) -> RunResult:
     )
     results: list[FoldResult] = []
     for split in _sequence_splits(config, data.glacier_ids, data.years):
+        train = _filter_temporal_train_indices(data, split)
         sequence_train, sequence_test = _scale_sequence(
-            data.sequence[split.train], data.sequence[split.test]
+            data.sequence[train], data.sequence[split.test]
         )
         model = create_model("temporal_lstm", parameters, config.random_seed)
-        model.fit_inputs(sequence_train, data.target[split.train])
+        model.fit_inputs(sequence_train, data.target[train])
         metrics = regression_metrics(data.target[split.test], model.predict_inputs(sequence_test))
         results.append(
             FoldResult(
                 split.fold,
-                len(split.train),
+                len(train),
                 len(split.test),
                 metrics["r2"],
                 metrics["rmse"],
