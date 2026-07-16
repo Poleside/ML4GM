@@ -32,6 +32,22 @@ def test_reject_duplicate_glacier_year() -> None:
         validate_annual_table(frame, "dhdt", "rgiid", "year")
 
 
+def test_reject_duplicate_glacier_year_after_year_normalization() -> None:
+    frame = valid_frame()
+    frame["year"] = [2000, "2000", 2000, 2001]
+
+    with pytest.raises(SchemaError, match="Duplicate glacier-year"):
+        validate_annual_table(frame, "dhdt", "rgiid", "year")
+
+
+def test_reject_fractional_years() -> None:
+    frame = valid_frame()
+    frame["year"] = [2000.5, 2001, 2000, 2001]
+
+    with pytest.raises(SchemaError, match="Years must be integers"):
+        validate_annual_table(frame, "dhdt", "rgiid", "year")
+
+
 def test_reject_missing_required_columns() -> None:
     with pytest.raises(SchemaError, match="Missing required columns: dhdt"):
         validate_annual_table(valid_frame().drop(columns="dhdt"))
