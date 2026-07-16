@@ -126,9 +126,7 @@ def test_mlp_training_is_deterministic() -> None:
         ({"batch_size": False}, "batch_size"),
     ],
 )
-def test_mlp_rejects_invalid_parameters(
-    parameters: dict[str, object], message: str
-) -> None:
+def test_mlp_rejects_invalid_parameters(parameters: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         create_model("mlp", parameters, seed=42)
 
@@ -153,9 +151,7 @@ def test_mlp_rejects_predict_and_save_before_fit(tmp_path: Path) -> None:
         (np.ones((2, 3)), np.ones((2, 2)), "one-dimensional"),
     ],
 )
-def test_mlp_fit_validates_input_shape(
-    X: np.ndarray, y: np.ndarray, message: str
-) -> None:
+def test_mlp_fit_validates_input_shape(X: np.ndarray, y: np.ndarray, message: str) -> None:
     model = create_model("mlp", {"epochs": 1}, seed=42)
 
     with pytest.raises(ValueError, match=message):
@@ -183,9 +179,7 @@ def test_mlp_predict_validates_input_shape_and_feature_count() -> None:
         (np.ones((2, 1)), np.array([1.0, np.inf]), "y.*finite"),
     ],
 )
-def test_mlp_fit_rejects_non_finite_values(
-    X: np.ndarray, y: np.ndarray, message: str
-) -> None:
+def test_mlp_fit_rejects_non_finite_values(X: np.ndarray, y: np.ndarray, message: str) -> None:
     model = create_model("mlp", {"epochs": 1}, seed=42)
 
     with pytest.raises(ValueError, match=message):
@@ -228,3 +222,105 @@ def test_mlp_checkpoint_saves_normalized_effective_parameters(tmp_path: Path) ->
         "epochs": 1,
         "batch_size": 2,
     }
+
+
+@pytest.mark.skipif(not torch_available, reason="install ml4gm[torch]")
+@pytest.mark.parametrize("name", ["seasonal_lstm", "temporal_lstm"])
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    [
+        ({"hidden": 0}, "hidden"),
+        ({"hidden": 2.5}, "hidden"),
+        ({"hidden": True}, "hidden"),
+        ({"num_layers": 0}, "num_layers"),
+        ({"dropout": 1.0}, "dropout"),
+        ({"dropout": "0.2"}, "dropout"),
+        ({"dropout": np.nan}, "dropout"),
+        ({"learning_rate": 0}, "learning_rate"),
+        ({"learning_rate": np.inf}, "learning_rate"),
+        ({"epochs": 0}, "epochs"),
+        ({"batch_size": False}, "batch_size"),
+    ],
+)
+def test_lstm_adapters_reject_invalid_parameters(
+    name: str, parameters: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        create_model(name, parameters, seed=42)
+
+
+@pytest.mark.skipif(not torch_available, reason="install ml4gm[torch]")
+def test_temporal_lstm_rejects_invalid_lookback() -> None:
+    with pytest.raises(ValueError, match="lookback"):
+        create_model("temporal_lstm", {"lookback": True}, seed=42)
+
+
+@pytest.mark.skipif(not torch_available, reason="install ml4gm[torch]")
+def test_seasonal_lstm_smoke_validation_determinism_and_checkpoint(
+    tmp_path: Path,
+) -> None:
+    parameters = {
+        "hidden": 4,
+        "num_layers": 1,
+        "dropout": 0,
+        "learning_rate": 1e-3,
+        "epochs": 2,
+        "batch_size": 2,
+    }
+    sequence = np.ones((2, 12, 2), dtype=float)
+    static = np.ones((2, 3), dtype=float)
+    y = np.array([0.0, 1.0])
+    first = create_model("seasonal_lstm", parameters, seed=42)
+    second = create_model("seasonal_lstm", parameters, seed=42)
+
+    first.fit_inputs(sequence, static, y)
+    second.fit_inputs(sequence, static, y)
+
+    np.testing.assert_array_equal(
+        first.predict_inputs(sequence, static),
+        second.predict_inputs(sequence, static),
+    )
+    with pytest.raises(ValueError, match="12"):
+        first.predict_inputs(np.ones((2, 11, 2)), static)
+    with pytest.raises(ValueError, match="2 sequence features"):
+        first.predict_inputs(np.ones((2, 12, 3)), static)
+    with pytest.raises(ValueError, match="finite"):
+        first.predict_inputs(sequence.copy().astype(float) * np.nan, static)
+    path = tmp_path / "seasonal.pt"
+    first.save(path)
+    checkpoint = importlib.import_module("torch").load(path)
+    assert checkpoint["parameters"] == parameters
+
+
+@pytest.mark.skipif(not torch_available, reason="install ml4gm[torch]")
+def test_temporal_lstm_smoke_validation_determinism_and_checkpoint(
+    tmp_path: Path,
+) -> None:
+    parameters = {
+        "lookback": 2,
+        "hidden": 4,
+        "num_layers": 1,
+        "dropout": 0,
+        "learning_rate": 1e-3,
+        "epochs": 2,
+        "batch_size": 2,
+    }
+    sequence = np.ones((4, 2, 3), dtype=float)
+    y = np.arange(4, dtype=float)
+    first = create_model("temporal_lstm", parameters, seed=42)
+    second = create_model("temporal_lstm", parameters, seed=42)
+
+    first.fit_inputs(sequence, y)
+    second.fit_inputs(sequence, y)
+
+    np.testing.assert_array_equal(first.predict_inputs(sequence), second.predict_inputs(sequence))
+    with pytest.raises(ValueError, match="2"):
+        first.predict_inputs(np.ones((2, 3, 3)))
+    with pytest.raises(ValueError, match="3 features"):
+        first.predict_inputs(np.ones((2, 2, 4)))
+    with pytest.raises(ValueError, match="finite"):
+        first.predict_inputs(np.full((1, 2, 3), np.inf))
+    path = tmp_path / "temporal.pt"
+    first.save(path)
+    checkpoint = importlib.import_module("torch").load(path)
+    assert checkpoint["parameters"] == parameters
