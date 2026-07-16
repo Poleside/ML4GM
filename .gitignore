@@ -2,3 +2,4 @@ data/
 proc_data/
 models/
 .worktrees/
+.superpowers/
