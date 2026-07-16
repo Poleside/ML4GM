@@ -9,8 +9,7 @@ def _group_map(values: NDArray, folds: int) -> dict[object, int]:
     if len(unique) < folds:
         raise ValueError(f"Block validation needs at least {folds} unique values")
     return {
-        value: min(index * folds // len(unique), folds - 1)
-        for index, value in enumerate(unique)
+        value: min(index * folds // len(unique), folds - 1) for index, value in enumerate(unique)
     }
 
 

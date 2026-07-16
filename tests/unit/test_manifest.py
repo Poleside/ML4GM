@@ -32,9 +32,7 @@ def test_manifest_records_dataset_identity(tmp_path: Path) -> None:
 
 def test_manifest_write_serializes_json(tmp_path: Path) -> None:
     csv = tmp_path / "data.csv"
-    frame = pd.DataFrame(
-        {"rgiid": ["A"], "year": [2000], "dhdt": [-0.2], "x": [None]}
-    )
+    frame = pd.DataFrame({"rgiid": ["A"], "year": [2000], "dhdt": [-0.2], "x": [None]})
     frame.to_csv(csv, index=False)
     manifest = DatasetManifest.from_frame(
         frame,

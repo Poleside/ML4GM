@@ -15,8 +15,7 @@ def test_load_quickstart_config() -> None:
 def test_reject_unknown_model(tmp_path: Path) -> None:
     path = tmp_path / "bad.yaml"
     path.write_text(
-        "data:\n  input: data.csv\nmodel:\n  name: magic\n"
-        "validation:\n  strategy: loyo\n",
+        "data:\n  input: data.csv\nmodel:\n  name: magic\nvalidation:\n  strategy: loyo\n",
         encoding="utf-8",
     )
     with pytest.raises(ConfigError, match="Unsupported model"):

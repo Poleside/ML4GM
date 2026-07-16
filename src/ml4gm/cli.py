@@ -53,9 +53,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         result = run_evaluation(config)
         for fold in result.folds:
-            print(
-                f"{fold.fold}: R2={fold.r2:.4f} RMSE={fold.rmse:.4f} MAE={fold.mae:.4f}"
-            )
+            print(f"{fold.fold}: R2={fold.r2:.4f} RMSE={fold.rmse:.4f} MAE={fold.mae:.4f}")
         return 0
     except (ConfigError, OSError, ValueError) as exc:
         print(f"ML4GM error: {exc}", file=sys.stderr)

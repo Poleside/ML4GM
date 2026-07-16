@@ -28,9 +28,7 @@ def test_quickstart_uses_the_supported_package_api() -> None:
 
 def test_quickstart_executes_from_the_tutorial_directory() -> None:
     tutorial_dir = Path("notebooks/tutorials").resolve()
-    payload = json.loads(
-        (tutorial_dir / "01_quickstart.ipynb").read_text(encoding="utf-8")
-    )
+    payload = json.loads((tutorial_dir / "01_quickstart.ipynb").read_text(encoding="utf-8"))
     assert [cell["cell_type"] for cell in payload["cells"]] == [
         "markdown",
         "code",

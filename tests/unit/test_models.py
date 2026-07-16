@@ -68,9 +68,7 @@ def test_lightgbm_native_library_error_preserves_diagnostic(
     assert "pip install" not in str(exc.value)
 
 
-def test_lightgbm_adapter_round_trip(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_lightgbm_adapter_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(
         sys.modules,
         "lightgbm",

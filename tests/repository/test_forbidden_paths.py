@@ -12,9 +12,7 @@ def test_supported_files_do_not_contain_machine_paths() -> None:
             [root]
             if root.is_file()
             else [
-                path
-                for path in root.rglob("*")
-                if path.is_file() and path.suffix in TEXT_SUFFIXES
+                path for path in root.rglob("*") if path.is_file() and path.suffix in TEXT_SUFFIXES
             ]
         )
         for path in paths:

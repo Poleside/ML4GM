@@ -4,9 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def generate_sample(
-    path: Path, glaciers: int = 12, years: int = 6, seed: int = 42
-) -> Path:
+def generate_sample(path: Path, glaciers: int = 12, years: int = 6, seed: int = 42) -> Path:
     if glaciers < 2 or years < 2:
         raise ValueError("Sample data requires at least 2 glaciers and 2 years")
     rng = np.random.default_rng(seed)

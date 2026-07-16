@@ -17,9 +17,7 @@ def test_prepare_sample_writes_sorted_data_and_manifest(tmp_path: Path) -> None:
 
     prepared = pd.read_csv(data_path)
     assert prepared[["rgiid", "year"]].equals(
-        prepared[["rgiid", "year"]]
-        .sort_values(["rgiid", "year"])
-        .reset_index(drop=True)
+        prepared[["rgiid", "year"]].sort_values(["rgiid", "year"]).reset_index(drop=True)
     )
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
