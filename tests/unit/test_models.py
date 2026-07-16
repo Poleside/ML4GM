@@ -52,7 +52,7 @@ def test_lightgbm_dependency_message(monkeypatch: pytest.MonkeyPatch) -> None:
         create_model("lightgbm", {}, seed=42)
 
 
-def test_lightgbm_native_library_error_has_dependency_message(
+def test_lightgbm_native_library_error_preserves_diagnostic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_import = builtins.__import__
@@ -63,8 +63,9 @@ def test_lightgbm_native_library_error_has_dependency_message(
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_with_broken_lightgbm)
-    with pytest.raises(RuntimeError, match=r"ml4gm\[lightgbm\]"):
+    with pytest.raises(RuntimeError, match=r"native runtime.*libomp\.dylib is unavailable") as exc:
         create_model("lightgbm", {}, seed=42)
+    assert "pip install" not in str(exc.value)
 
 
 def test_lightgbm_adapter_round_trip(
@@ -75,7 +76,17 @@ def test_lightgbm_adapter_round_trip(
         "lightgbm",
         SimpleNamespace(LGBMRegressor=FakeLGBMRegressor),
     )
-    model = create_model("lightgbm", {"n_estimators": 5, "n_jobs": 1}, seed=42)
+    model = create_model(
+        "lightgbm",
+        {"n_estimators": 5, "n_jobs": 1, "random_state": 7, "verbosity": 2},
+        seed=42,
+    )
+    assert model.estimator.parameters == {
+        "n_estimators": 5,
+        "n_jobs": 1,
+        "random_state": 42,
+        "verbosity": 2,
+    }
     X = np.array([[0.0], [1.0], [2.0], [3.0]])
     y = np.array([0.0, 1.0, 2.0, 3.0])
 
@@ -95,8 +106,10 @@ def test_installed_lightgbm_adapter_round_trip(tmp_path: Path) -> None:
         pytest.skip("LightGBM is not installed")
     try:
         from lightgbm import LGBMRegressor  # noqa: F401
-    except (ImportError, OSError) as exc:
-        pytest.skip(f"LightGBM native runtime unavailable: {exc}")
+    except OSError as exc:
+        if "incompatible architecture" in str(exc):
+            pytest.skip(f"LightGBM native runtime architecture mismatch: {exc}")
+        raise
 
     model = create_model("lightgbm", {"n_estimators": 5, "n_jobs": 1}, seed=42)
     X = np.array([[0.0], [1.0], [2.0], [3.0]])
