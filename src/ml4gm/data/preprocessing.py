@@ -32,11 +32,18 @@ def prepare_fold(
 
     train = frame.iloc[train_idx]
     test = frame.iloc[test_idx]
+    all_missing = train[features].columns[train[features].isna().all()].tolist()
+    if all_missing:
+        raise ValueError(f"Training features contain only missing values: {all_missing}")
+
     transformer = Pipeline(
         [("imputer", SimpleImputer(strategy="median")), ("scaler", StandardScaler())]
     )
     X_train = transformer.fit_transform(train[features]).astype(float)
     X_test = transformer.transform(test[features]).astype(float)
+    if X_train.shape[1] != len(features) or X_test.shape[1] != len(features):
+        raise ValueError("Transformed feature width does not match feature names")
+
     return PreparedFold(
         X_train,
         X_test,
