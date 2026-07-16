@@ -1,3 +1,4 @@
 data/
 proc_data/
 models/
+.worktrees/
