@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -52,7 +53,13 @@ def test_seasonal_runner_writes_result(tmp_path: Path) -> None:
     result = run_evaluation(config)
 
     assert len(result.folds) == 4
-    assert (config.data.output_dir / "result.json").exists()
+    record = json.loads(
+        (config.data.output_dir / "result.json").read_text(encoding="utf-8")
+    )
+    assert record["status"] == "completed"
+    assert record["model"] == "seasonal_lstm"
+    assert record["model_parameters"]["hidden"] == 4
+    assert record["data_summary"]["rows"] == 16
 
 
 def test_temporal_spatial_groups_and_runner(tmp_path: Path) -> None:
@@ -84,7 +91,13 @@ def test_temporal_spatial_groups_and_runner(tmp_path: Path) -> None:
     result = run_evaluation(config)
 
     assert len(result.folds) == 2
-    assert (config.data.output_dir / "result.json").exists()
+    record = json.loads(
+        (config.data.output_dir / "result.json").read_text(encoding="utf-8")
+    )
+    assert record["status"] == "completed"
+    assert record["model"] == "temporal_lstm"
+    assert record["model_parameters"]["lookback"] == 2
+    assert record["data_summary"]["rows"] == 16
 
 
 def test_temporal_loyo_removes_training_windows_containing_held_out_target_rows() -> None:

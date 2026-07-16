@@ -22,6 +22,17 @@ For every fold:
 Report every fold, not only an average, and record failures rather than silently
 dropping difficult folds.
 
+## Authoritative run record
+
+Every supported runner writes the same `result.json` schema. A completed record
+includes the portable resolved configuration, software versions, exact input
+SHA-256, optional neighbouring manifest identity, row/feature/glacier/year
+coverage, effective model parameters, validation settings, fold metrics, and
+artifact paths. Expected input, dependency, and runtime failures write the same
+record with `status: failed` and a concise error type and message before the
+exception is re-raised. Host-specific absolute directory trees are not
+published in the record.
+
 ## Leave-one-year-out (LOYO)
 
 Each unique target year forms one test fold. Training contains every row whose

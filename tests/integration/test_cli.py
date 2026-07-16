@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 
 from ml4gm.cli import main
+from ml4gm.evaluation import runner
 
 
 def test_cli_runs_quickstart(tmp_path: Path) -> None:
@@ -56,6 +58,39 @@ def test_cli_reports_output_path_conflict(tmp_path: Path, capsys) -> None:
         == 2
     )
     assert "ML4GM error:" in capsys.readouterr().err
+
+
+def test_cli_writes_failed_run_record_before_returning_two(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    output_dir = tmp_path / "failed-run"
+
+    def fail_model_creation(*args, **kwargs):
+        raise ValueError("controlled model failure")
+
+    monkeypatch.setattr(runner, "create_model", fail_model_creation)
+
+    exit_code = main(
+        [
+            "evaluate",
+            "--config",
+            "configs/quickstart.yaml",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "controlled model failure" in capsys.readouterr().err
+    record = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+    assert record["status"] == "failed"
+    assert record["error"] == {
+        "type": "ValueError",
+        "message": "controlled model failure",
+    }
+    assert record["input_manifest"]["input_sha256"]
+    assert record["data_summary"]["rows"] == 72
+    assert record["folds"] == []
 
 
 def test_cli_prepares_data(tmp_path: Path) -> None:

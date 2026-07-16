@@ -73,10 +73,15 @@ training fold only. The exact leakage invariants are documented in
 
 ## Results and reproducibility
 
-Each evaluation records the run name, model, validation strategy, random seed,
-fold sizes, R², RMSE, and MAE in JSON. Configuration and source manifests should
-be retained with published results. Synthetic quickstart metrics and embedded
-legacy-notebook outputs are not scientific benchmark evidence.
+Each evaluation writes an authoritative `result.json` run record. It contains
+the resolved portable configuration, ML4GM and Python versions, the exact input
+SHA-256 (plus a neighbouring prepared-data manifest when present), data
+coverage, effective model parameters, validation details, fold sizes, R²,
+RMSE, MAE, and explicit artifact paths. Expected data, dependency, and model
+runtime failures also write a record with `status: failed` before the error is
+returned to the caller. Configuration files and prepared-data manifests should
+still be retained with published results. Synthetic quickstart metrics and
+embedded legacy-notebook outputs are not scientific benchmark evidence.
 
 ## Data licensing
 
