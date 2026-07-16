@@ -48,7 +48,8 @@ def test_ci_uses_stable_actions_and_checks_all_supported_sources() -> None:
     assert isinstance(quality, dict)
     commands = _commands(quality)
 
-    for job in jobs.values():
+    for name in ("quality", "package", "lightgbm", "pytorch", "dependency-audit"):
+        job = jobs[name]
         assert isinstance(job, dict)
         steps = job["steps"]
         assert isinstance(steps, list)
@@ -76,6 +77,7 @@ def test_package_uses_pep639_license_metadata() -> None:
     assert project["license"] == "Apache-2.0"
     assert project["license-files"] == ["LICENSE"]
     assert "License :: OSI Approved :: Apache Software License" not in project["classifiers"]
+    assert "pytest>=8.3,<10" in project["optional-dependencies"]["dev"]
 
 
 def test_ci_validates_citation_and_built_distribution_quickstart() -> None:
@@ -140,6 +142,40 @@ def test_ci_runs_real_neural_tests_on_minimum_and_current_pytorch() -> None:
     assert "torch.from_numpy" in script
     assert ".numpy()" in script
     assert "Failed to initialize NumPy" in script
+
+
+def test_ci_blocks_dependency_vulnerabilities_after_installing_project() -> None:
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    audit = jobs["dependency-audit"]
+    assert isinstance(audit, dict)
+    commands = _commands(audit)
+
+    assert audit["runs-on"] == "ubuntu-latest"
+    assert audit["permissions"] == {"contents": "read"}
+    assert commands[-3:] == [
+        'python -m pip install --upgrade pip "setuptools>=83"',
+        'python -m pip install -e ".[dev]" "pip-audit>=2.9,<3"',
+        "pip-audit --cache-dir /tmp/pip-audit-cache",
+    ]
+
+
+def test_ci_scans_full_git_history_for_secrets_with_minimal_permissions() -> None:
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    secret_scan = jobs["secret-scan"]
+    assert isinstance(secret_scan, dict)
+    steps = secret_scan["steps"]
+    assert isinstance(steps, list)
+
+    assert secret_scan["runs-on"] == "ubuntu-latest"
+    assert secret_scan["permissions"] == {"contents": "read"}
+    assert steps == [
+        {"uses": "actions/checkout@v4", "with": {"fetch-depth": 0}},
+        {"uses": "gitleaks/gitleaks-action@v2"},
+    ]
 
 
 def test_issue_and_pr_templates_cover_data_rights_and_leakage() -> None:

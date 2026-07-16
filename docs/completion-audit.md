@@ -18,7 +18,7 @@ source revision explicit.
 | 1 | Repository is publicly licensed under Apache-2.0. | Local `LICENSE` and `pyproject.toml` declare Apache-2.0. GitHub reports the repository is public but its public `master` is still `2d4bf00` with `licenseInfo: null`. | **Pending public publication** | Review and publish the preparation branch; verify GitHub detects Apache-2.0. |
 | 2 | A new user can install from a clean Python 3.11 environment. | A fresh Python 3.11.15 venv at `/tmp/ml4gm-release-venv` completed `pip install -e .`, imported version 0.1.0, and ran the CLI. | **Complete locally** | Repeat in public CI and from the reviewed release revision. |
 | 3 | CPU quickstart completes without private paths or unavailable raw data. | The quickstart completed in both local environments using the tracked synthetic CSV. Supported-code forbidden-path scan had no matches. | **Complete locally** | Confirm the same command passes in public CI. |
-| 4 | CI validates linting, tests, and packaging. | `.github/workflows/ci.yml` defines quality, package, LightGBM, and PyTorch jobs. `gh run list --workflow CI` reports no public workflow because the branch is not published. | **Pending public CI** | Push or merge after review, then require every public CI job to pass. |
+| 4 | CI validates linting, tests, packaging, dependencies, and secrets. | `.github/workflows/ci.yml` defines quality, package, LightGBM, PyTorch, blocking dependency-audit, and full-history secret-scan jobs. Repository metadata tests verify the security jobs, but `gh run list --workflow CI` reports no public workflow because the branch is not published. | **Pending public CI** | Push or merge after review, then require every public CI job, including both security gates, to pass. |
 | 5 | Leakage invariants are covered by automated tests. | The 167 passing tests include LOYO, spatial, block, fold-local preprocessing, and sequence-context isolation tests. | **Complete locally** | Reconfirm on the exact public revision. |
 | 6 | Upstream provenance and redistribution boundaries are documented. | `DATA_SOURCES.md`, `docs/full-data-setup.md`, and the synthetic-data statements document acquisition and redistribution boundaries. The historical `code/model_result1.npz` is already present in the public `origin/master` ancestry. | **Complete locally; release decision pending** | It does not block publishing/reviewing this preparation branch, but Poleside must decide its rights status before the v0.1.0 tag/release. Do not rewrite public history without explicit owner authorization. |
 | 7 | Legacy notebooks are preserved and separated from supported APIs. | Historical notebooks are under `notebooks/legacy/`; supported execution is under `src/ml4gm/` and `notebooks/tutorials/`. Repository tests verify this separation. | **Complete locally** | Preserve the separation in the published revision. |
@@ -52,6 +52,8 @@ source revision explicit.
 - Secret review: heuristic current-tree and history pattern searches found no
   common token, private-key, password, or API-key assignment pattern. This is
   supporting evidence, not a guarantee or a replacement for public scanning.
+  Blocking `pip-audit` and full-history Gitleaks jobs are now configured with
+  minimal permissions; their first public run remains pending publication.
 
 ## Release decision
 

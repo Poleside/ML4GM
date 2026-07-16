@@ -53,9 +53,14 @@ Re-run every command against the exact revision proposed for release.
 - [x] Current-tree heuristic secret scan found no common API token, private-key,
   password-assignment, or API-key-assignment pattern outside the separated
   legacy/specification paths.
-- [ ] Run the configured public dependency and secret/security checks. Local
-  heuristic scans are not a substitute for public CI or GitHub security
-  features.
+- [x] Dependency and secret-scanning gates are configured in
+  `.github/workflows/ci.yml`: `dependency-audit` installs the project and runs
+  blocking `pip-audit`, while `secret-scan` checks the complete Git history
+  with the official Gitleaks action. Repository tests verify their commands,
+  permissions, and checkout depth.
+- [ ] Run the configured dependency and secret-scanning gates on the public
+  revision. Local configuration and heuristic scans are not substitutes for a
+  successful public CI run or GitHub security features.
 
 ## Project and application metadata
 
