@@ -55,9 +55,10 @@ def test_quickstart_produces_all_year_folds(tmp_path: Path) -> None:
     }
     assert record["software"]["ml4gm"] == __version__
     assert record["software"]["python"]
-    assert record["input_manifest"]["input_sha256"] == hashlib.sha256(
-        config.data.input.read_bytes()
-    ).hexdigest()
+    assert (
+        record["input_manifest"]["input_sha256"]
+        == hashlib.sha256(config.data.input.read_bytes()).hexdigest()
+    )
     assert record["data_summary"] == {
         "rows": 72,
         "features": ["Area", "Zmed", "t2m", "tp"],

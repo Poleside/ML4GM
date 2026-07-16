@@ -53,9 +53,7 @@ def test_seasonal_runner_writes_result(tmp_path: Path) -> None:
     result = run_evaluation(config)
 
     assert len(result.folds) == 4
-    record = json.loads(
-        (config.data.output_dir / "result.json").read_text(encoding="utf-8")
-    )
+    record = json.loads((config.data.output_dir / "result.json").read_text(encoding="utf-8"))
     assert record["status"] == "completed"
     assert record["model"] == "seasonal_lstm"
     assert record["model_parameters"]["hidden"] == 4
@@ -93,9 +91,7 @@ def test_temporal_spatial_groups_and_runner(tmp_path: Path) -> None:
     result = run_evaluation(config)
 
     assert len(result.folds) == 2
-    record = json.loads(
-        (config.data.output_dir / "result.json").read_text(encoding="utf-8")
-    )
+    record = json.loads((config.data.output_dir / "result.json").read_text(encoding="utf-8"))
     assert record["status"] == "completed"
     assert record["model"] == "temporal_lstm"
     assert record["model_parameters"]["lookback"] == 2
@@ -125,9 +121,7 @@ def test_sequence_runner_records_default_input_design(tmp_path: Path) -> None:
     assert seasonal_record["model_parameters"]["static_features"] == ["Area", "Zmed"]
 
     temporal_input = tmp_path / "temporal-default.csv"
-    frame[["rgiid", "year", "dhdt", "Area", "Zmed"]].to_csv(
-        temporal_input, index=False
-    )
+    frame[["rgiid", "year", "dhdt", "Area", "Zmed"]].to_csv(temporal_input, index=False)
     temporal_config = RunConfig(
         data=DataConfig(temporal_input, output_dir=tmp_path / "temporal-default"),
         model=ModelConfig(

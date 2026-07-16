@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import platform
 from contextlib import suppress
@@ -53,8 +54,9 @@ def _resolved_config(config: RunConfig) -> dict[str, Any]:
     return _json_value(asdict(config))
 
 
-def _input_manifest(input_path: Path) -> dict[str, Any]:
-    input_digest = hashlib.sha256(input_path.read_bytes()).hexdigest()
+def _input_manifest(input_path: Path, *, input_bytes: bytes | None = None) -> dict[str, Any]:
+    snapshot = input_path.read_bytes() if input_bytes is None else input_bytes
+    input_digest = hashlib.sha256(snapshot).hexdigest()
     identity: dict[str, Any] = {"input_sha256": input_digest}
     candidates = (
         input_path.with_suffix(".manifest.json"),
@@ -64,13 +66,14 @@ def _input_manifest(input_path: Path) -> dict[str, Any]:
         if not candidate.is_file():
             continue
         try:
-            manifest = json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            manifest_bytes = candidate.read_bytes()
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
         if not isinstance(manifest, dict) or manifest.get("sha256") != input_digest:
             continue
         identity["manifest_path"] = _portable_path(candidate)
-        identity["manifest_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        identity["manifest_sha256"] = hashlib.sha256(manifest_bytes).hexdigest()
         identity["manifest_input_sha256"] = input_digest
         break
     return identity
@@ -320,9 +323,10 @@ def run_evaluation(config: RunConfig) -> RunResult:
                 f"Input data not found: {_portable_path(config.data.input)}. "
                 "Generate the sample or follow docs/full-data-setup.md."
             )
-        input_identity = _input_manifest(config.data.input)
+        input_bytes = config.data.input.read_bytes()
+        input_identity = _input_manifest(config.data.input, input_bytes=input_bytes)
         frame = validate_annual_table(
-            pd.read_csv(config.data.input),
+            pd.read_csv(io.BytesIO(input_bytes)),
             config.data.target,
             config.data.glacier_id,
             config.data.year,
@@ -343,9 +347,7 @@ def run_evaluation(config: RunConfig) -> RunResult:
                     config.data.glacier_id,
                     config.data.year,
                 )
-                model = create_model(
-                    config.model.name, config.model.parameters, config.random_seed
-                )
+                model = create_model(config.model.name, config.model.parameters, config.random_seed)
                 model_parameters = _effective_parameters(model, config)
                 model.fit(prepared.X_train, prepared.y_train)
                 metrics = regression_metrics(prepared.y_test, model.predict(prepared.X_test))
