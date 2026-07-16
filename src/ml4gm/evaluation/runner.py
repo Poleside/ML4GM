@@ -54,24 +54,24 @@ def _resolved_config(config: RunConfig) -> dict[str, Any]:
 
 
 def _input_manifest(input_path: Path) -> dict[str, Any]:
-    identity: dict[str, Any] = {
-        "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest()
-    }
+    input_digest = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    identity: dict[str, Any] = {"input_sha256": input_digest}
     candidates = (
-        input_path.parent / "manifest.json",
         input_path.with_suffix(".manifest.json"),
+        input_path.parent / "manifest.json",
     )
     for candidate in candidates:
         if not candidate.is_file():
             continue
-        identity["manifest_path"] = _portable_path(candidate)
-        identity["manifest_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
         try:
             manifest = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            break
-        if isinstance(manifest, dict) and isinstance(manifest.get("sha256"), str):
-            identity["manifest_input_sha256"] = manifest["sha256"]
+            continue
+        if not isinstance(manifest, dict) or manifest.get("sha256") != input_digest:
+            continue
+        identity["manifest_path"] = _portable_path(candidate)
+        identity["manifest_sha256"] = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        identity["manifest_input_sha256"] = input_digest
         break
     return identity
 
@@ -113,11 +113,9 @@ def _record(
     frame: pd.DataFrame | None = None,
     folds: list[FoldResult] | None = None,
     model_parameters: dict[str, Any] | None = None,
+    input_identity: dict[str, Any] | None = None,
     error: BaseException | None = None,
 ) -> RunResult:
-    input_identity: dict[str, Any] = {}
-    if config.data.input.is_file():
-        input_identity = _input_manifest(config.data.input)
     return RunResult(
         run_name=config.run_name,
         model=config.model.name,
@@ -127,7 +125,7 @@ def _record(
         status=status,
         resolved_config=_resolved_config(config),
         software={"ml4gm": __version__, "python": platform.python_version()},
-        input_manifest=input_identity,
+        input_manifest=input_identity or {},
         data_summary=_data_summary(config, frame) if frame is not None else {},
         model_parameters=model_parameters or _json_value(dict(config.model.parameters)),
         validation_details={
@@ -138,7 +136,7 @@ def _record(
         error=(
             {
                 "type": type(error).__name__,
-                "message": _portable_error_message(config, error),
+                "message": _portable_error_message(error),
             }
             if error is not None
             else None
@@ -146,13 +144,14 @@ def _record(
     )
 
 
-def _portable_error_message(config: RunConfig, error: BaseException) -> str:
-    message = str(error)
-    for path in (config.data.input, config.data.output_dir, Path.cwd(), Path.home()):
-        if path.is_absolute():
-            replacement = "~" if path == Path.home() else _portable_path(path)
-            message = message.replace(str(path), replacement)
-    return message
+def _portable_error_message(error: BaseException) -> str:
+    if isinstance(error, FileNotFoundError):
+        return "Evaluation input was not found."
+    if isinstance(error, OSError):
+        return "Evaluation input/output operation failed."
+    if isinstance(error, RuntimeError):
+        return "Evaluation model or runtime dependency failed."
+    return "Evaluation failed due to invalid data or parameters."
 
 
 def _splits(config: RunConfig, frame: pd.DataFrame) -> list[Split]:
@@ -243,6 +242,8 @@ def _run_seasonal(
         static_test = scaler.transform(data.static[split.test])
         model = create_model("seasonal_lstm", parameters, config.random_seed)
         effective_parameters = _effective_parameters(model, config)
+        effective_parameters["monthly_variables"] = monthly_variables
+        effective_parameters["static_features"] = static_features
         model.fit_inputs(sequence_train, static_train, data.target[split.train])
         metrics = regression_metrics(
             data.target[split.test],
@@ -294,6 +295,7 @@ def _run_temporal(
         )
         model = create_model("temporal_lstm", parameters, config.random_seed)
         effective_parameters = _effective_parameters(model, config)
+        effective_parameters["feature_columns"] = feature_columns
         model.fit_inputs(sequence_train, data.target[train])
         metrics = regression_metrics(data.target[split.test], model.predict_inputs(sequence_test))
         results.append(
@@ -311,12 +313,14 @@ def _run_temporal(
 
 def run_evaluation(config: RunConfig) -> RunResult:
     frame: pd.DataFrame | None = None
+    input_identity: dict[str, Any] = {}
     try:
         if not config.data.input.exists():
             raise FileNotFoundError(
                 f"Input data not found: {_portable_path(config.data.input)}. "
                 "Generate the sample or follow docs/full-data-setup.md."
             )
+        input_identity = _input_manifest(config.data.input)
         frame = validate_annual_table(
             pd.read_csv(config.data.input),
             config.data.target,
@@ -361,6 +365,7 @@ def run_evaluation(config: RunConfig) -> RunResult:
             frame=frame,
             folds=fold_results,
             model_parameters=model_parameters,
+            input_identity=input_identity,
         )
         result.write(config.data.output_dir / "result.json")
         return result
@@ -369,6 +374,7 @@ def run_evaluation(config: RunConfig) -> RunResult:
             config,
             status="failed",
             frame=frame,
+            input_identity=input_identity,
             error=exc,
         )
         with suppress(OSError):

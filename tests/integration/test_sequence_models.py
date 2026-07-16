@@ -59,6 +59,8 @@ def test_seasonal_runner_writes_result(tmp_path: Path) -> None:
     assert record["status"] == "completed"
     assert record["model"] == "seasonal_lstm"
     assert record["model_parameters"]["hidden"] == 4
+    assert record["model_parameters"]["monthly_variables"] == ["t2m", "tp"]
+    assert record["model_parameters"]["static_features"] == ["Area", "Zmed"]
     assert record["data_summary"]["rows"] == 16
 
 
@@ -97,7 +99,51 @@ def test_temporal_spatial_groups_and_runner(tmp_path: Path) -> None:
     assert record["status"] == "completed"
     assert record["model"] == "temporal_lstm"
     assert record["model_parameters"]["lookback"] == 2
+    assert record["model_parameters"]["feature_columns"] == ["Area", "Zmed"]
     assert record["data_summary"]["rows"] == 16
+
+
+def test_sequence_runner_records_default_input_design(tmp_path: Path) -> None:
+    frame = _seasonal_frame()
+    seasonal_input = tmp_path / "seasonal-default.csv"
+    frame.to_csv(seasonal_input, index=False)
+    seasonal_config = RunConfig(
+        data=DataConfig(seasonal_input, output_dir=tmp_path / "seasonal-default"),
+        model=ModelConfig(
+            "seasonal_lstm",
+            {"hidden": 4, "epochs": 1, "batch_size": 4},
+        ),
+        validation=ValidationConfig("loyo", 2),
+    )
+
+    run_evaluation(seasonal_config)
+    seasonal_record = json.loads(
+        (seasonal_config.data.output_dir / "result.json").read_text(encoding="utf-8")
+    )
+
+    assert seasonal_record["model_parameters"]["monthly_variables"] == ["t2m", "tp"]
+    assert seasonal_record["model_parameters"]["static_features"] == ["Area", "Zmed"]
+
+    temporal_input = tmp_path / "temporal-default.csv"
+    frame[["rgiid", "year", "dhdt", "Area", "Zmed"]].to_csv(
+        temporal_input, index=False
+    )
+    temporal_config = RunConfig(
+        data=DataConfig(temporal_input, output_dir=tmp_path / "temporal-default"),
+        model=ModelConfig(
+            "temporal_lstm",
+            {"hidden": 4, "epochs": 1, "batch_size": 4},
+        ),
+        validation=ValidationConfig("spatial", 2),
+    )
+
+    run_evaluation(temporal_config)
+    temporal_record = json.loads(
+        (temporal_config.data.output_dir / "result.json").read_text(encoding="utf-8")
+    )
+
+    assert temporal_record["model_parameters"]["feature_columns"] == ["Area", "Zmed"]
+    assert temporal_record["model_parameters"]["lookback"] == 3
 
 
 def test_temporal_loyo_removes_training_windows_containing_held_out_target_rows() -> None:

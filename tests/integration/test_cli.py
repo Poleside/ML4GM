@@ -65,8 +65,10 @@ def test_cli_writes_failed_run_record_before_returning_two(
 ) -> None:
     output_dir = tmp_path / "failed-run"
 
+    sensitive_detail = "bad /tmp/private.csv?token=TOP-SECRET https://host/x?api_key=ABC"
+
     def fail_model_creation(*args, **kwargs):
-        raise ValueError("controlled model failure")
+        raise ValueError(sensitive_detail)
 
     monkeypatch.setattr(runner, "create_model", fail_model_creation)
 
@@ -81,13 +83,17 @@ def test_cli_writes_failed_run_record_before_returning_two(
     )
 
     assert exit_code == 2
-    assert "controlled model failure" in capsys.readouterr().err
+    assert sensitive_detail in capsys.readouterr().err
     record = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
     assert record["status"] == "failed"
     assert record["error"] == {
         "type": "ValueError",
-        "message": "controlled model failure",
+        "message": "Evaluation failed due to invalid data or parameters.",
     }
+    serialized = json.dumps(record)
+    assert "/tmp/private.csv" not in serialized
+    assert "TOP-SECRET" not in serialized
+    assert "api_key" not in serialized
     assert record["input_manifest"]["input_sha256"]
     assert record["data_summary"]["rows"] == 72
     assert record["folds"] == []
