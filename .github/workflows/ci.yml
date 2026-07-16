@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - "codex/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: pytest
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install "build>=1.2,<2" "cffconvert==2.0.0"
+      - run: cffconvert --validate
+      - run: python -m build
+      - run: python -m pip install dist/*.whl
+      - run: ml4gm evaluate --config configs/quickstart.yaml --output-dir /tmp/ml4gm-ci
+
+  lightgbm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev,lightgbm]"
+      - run: python tests/ci/lightgbm_roundtrip.py
+      - run: pytest tests/unit/test_models.py
+
+  pytorch:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        torch-spec:
+          - "torch==2.4.*"
+          - "torch>=2.4,<3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev,torch]" "${{ matrix.torch-spec }}"
+      - run: python tests/ci/torch_roundtrip.py
+      - run: pytest tests/unit/test_neural_models.py tests/integration/test_sequence_models.py

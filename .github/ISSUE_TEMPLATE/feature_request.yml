@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a scientifically testable ML4GM improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Scientific or maintainer problem
+      description: Explain the concrete research or maintenance problem.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the interface and expected outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation requirements
+      description: Define metrics, baselines, splits, and leakage controls.
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data and license implications
+      description: Document provenance, data rights, redistribution limits, and restricted data risks.
+    validations:
+      required: true

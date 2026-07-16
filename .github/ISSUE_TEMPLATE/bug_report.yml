@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible ML4GM failure without sharing restricted data.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve ML4GM. Do not upload restricted data,
+        confidential data, credentials, or data that you do not have the right to share.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, Python version, ML4GM version, and optional extras.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and configuration
+      description: Provide the command and a minimal sanitized configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Minimal data description
+      description: Describe shape, columns, provenance, and data rights. Do not upload restricted data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: leakage
+    attributes:
+      label: Leakage assessment
+      description: Note whether glacier, year, spatial, or temporal leakage may be involved.
