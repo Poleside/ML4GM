@@ -3,7 +3,6 @@ message: "If you use ML4GM, cite this software and every upstream dataset used."
 title: "ML4GM: Reproducible Machine Learning Benchmarks for Glacier Elevation Change"
 type: software
 version: 0.1.0
-date-released: 2026-07-17
 license: Apache-2.0
 repository-code: "https://github.com/Poleside/ML4GM"
 url: "https://github.com/Poleside/ML4GM"

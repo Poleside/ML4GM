@@ -53,6 +53,15 @@ def test_reject_missing_required_columns() -> None:
         validate_annual_table(valid_frame().drop(columns="dhdt"))
 
 
+@pytest.mark.parametrize("invalid_identifier", ["", "   ", 123])
+def test_reject_invalid_glacier_identifiers(invalid_identifier: object) -> None:
+    frame = valid_frame()
+    frame.loc[0, "rgiid"] = invalid_identifier
+
+    with pytest.raises(SchemaError, match="non-empty strings"):
+        validate_annual_table(frame)
+
+
 def test_reject_table_without_features() -> None:
     frame = valid_frame().drop(columns="Area")
 

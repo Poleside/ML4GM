@@ -22,6 +22,11 @@ def validate_annual_table(
     result = frame.copy()
     if result[required].isna().any().any():
         raise SchemaError("Identifiers, years, and targets must not be missing")
+    identifiers_are_valid = result[glacier_id].map(
+        lambda value: isinstance(value, str) and bool(value.strip())
+    )
+    if not identifiers_are_valid.all():
+        raise SchemaError("Glacier identifiers must be non-empty strings")
 
     normalized_years = pd.to_numeric(result[year], errors="raise")
     if not (normalized_years % 1 == 0).all():

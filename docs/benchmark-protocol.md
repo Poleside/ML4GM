@@ -62,6 +62,16 @@ excluded or test rows.
 Strict blocks test joint transfer to unseen glacier-and-year combinations.
 Because excluded cross-block rows reduce training data, report exact fold sizes.
 
+## Regression coverage
+
+The temporal leakage invariants are executable requirements, not documentation
+alone. The integration suite includes
+[`test_temporal_loyo_filters_held_out_year_from_unbalanced_glacier_context`](../tests/integration/test_sequence_models.py)
+and
+[`test_temporal_block_filters_entire_held_out_year_group_from_context`](../tests/integration/test_sequence_models.py).
+These regressions verify that held-out year groups cannot re-enter model fitting
+through temporal context windows.
+
 ## Comparison requirements
 
 Use identical outer splits, input features, target units, and metric

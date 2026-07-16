@@ -6,20 +6,12 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
-### Added
+### Preparing 0.1.0
 
 - Continuous-integration, issue, and pull-request community infrastructure.
-
-## [0.1.0] - 2026-07-17
-
-### Added
-
 - Installable `ml4gm` package and configuration-driven command-line interface.
 - Synthetic CPU quickstart and deterministic dataset manifests.
 - Random Forest, optional LightGBM, MLP, seasonal LSTM, and temporal LSTM models.
 - LOYO, spatial GroupKFold, and strict block validation.
 - Supported tutorial with preserved legacy research notebooks.
 - Apache-2.0 licensing, governance, data-source registry, and scientific guidance.
-
-[Unreleased]: https://github.com/Poleside/ML4GM/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/Poleside/ML4GM/releases/tag/v0.1.0

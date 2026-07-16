@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -78,20 +81,32 @@ def test_governance_facts_and_policies_are_explicit() -> None:
     maintainers = _read("MAINTAINERS.md")
     assert "Poleside" in maintainers and "repository owner" in maintainers
     assert "HectorGao" in maintainers and "write access" in maintainers
-    assert "Private vulnerability reporting" in _read("SECURITY.md")
+    security = _read("SECURITY.md")
+    assert "Private vulnerability reporting" in security
+    assert "no public release has yet been published" in " ".join(security.split())
+    assert "If private vulnerability reporting is enabled" in security
+    assert "public contact method on their GitHub profile" in " ".join(security.split())
     conduct = _read("CODE_OF_CONDUCT.md")
     assert "Contributor Covenant" in conduct
     assert "version 2.1" in conduct
     assert "https://www.contributor-covenant.org/version/2/1/code_of_conduct.html" in conduct
 
 
-def test_citation_file_is_valid_and_matches_the_release() -> None:
+def test_citation_metadata_fields_match_the_unreleased_project() -> None:
     citation = yaml.safe_load(_read("CITATION.cff"))
     assert citation["cff-version"] == "1.2.0"
     assert citation["version"] == "0.1.0"
     assert citation["license"] == "Apache-2.0"
     assert citation["repository-code"] == "https://github.com/Poleside/ML4GM"
     assert [author["name"] for author in citation["authors"]] == ["Poleside", "HectorGao"]
+    assert "date-released" not in citation
+
+
+def test_changelog_does_not_claim_an_unpublished_release() -> None:
+    text = _read("CHANGELOG.md")
+    assert "Preparing 0.1.0" in text
+    assert "## [0.1.0]" not in text
+    assert "/releases/tag/v0.1.0" not in text
 
 
 def test_documentation_uses_only_portable_runtime_placeholders() -> None:
@@ -130,10 +145,24 @@ def test_internal_markdown_links_resolve() -> None:
     assert broken == []
 
 
+def test_temporal_protocol_links_to_leakage_regressions() -> None:
+    protocol = _read("docs/benchmark-protocol.md")
+    regression_tests = _read("tests/integration/test_sequence_models.py")
+    assert "../tests/integration/test_sequence_models.py" in protocol
+    for regression in (
+        "test_temporal_loyo_filters_held_out_year_from_unbalanced_glacier_context",
+        "test_temporal_block_filters_entire_held_out_year_group_from_context",
+    ):
+        assert regression in protocol
+        assert f"def {regression}" in regression_tests
+
+
 def test_readme_quickstart_executes(tmp_path: Path) -> None:
+    executable = shutil.which("ml4gm", path=str(Path(sys.executable).parent))
+    assert executable is not None, "the dev environment must install the ml4gm console entry point"
     result = subprocess.run(
         [
-            str(ROOT / ".venv/bin/ml4gm"),
+            executable,
             "evaluate",
             "--config",
             str(ROOT / "configs/quickstart.yaml"),
@@ -148,3 +177,5 @@ def test_readme_quickstart_executes(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "R2=" in result.stdout
+    record = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert len(record["folds"]) == 6

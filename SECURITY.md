@@ -2,16 +2,17 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest `0.1.x` release line. Development
-branches and historical notebooks are not supported release artifacts.
+Security fixes are currently prepared for the `0.1.x` development line; no
+public release has yet been published. Historical notebooks are not supported
+release artifacts.
 
 ## Private vulnerability reporting
 
-Use the repository's **Security** tab to submit a
-[private vulnerability report](https://github.com/Poleside/ML4GM/security/advisories/new).
-If that interface is unavailable, contact a maintainer through the public
-contact method on their GitHub profile and ask for a private reporting channel.
-Do not include exploit details in a public issue.
+If private vulnerability reporting is enabled for this repository, use its
+**Security** tab to submit a private vulnerability report. Until that interface
+is available, contact a maintainer through the public contact method on their
+GitHub profile and ask for a private reporting channel. Do not include exploit
+details in a public issue.
 
 Include affected versions, environment, reproduction steps, impact, and any
 proposed mitigation. Maintainers will acknowledge the report, investigate it,
