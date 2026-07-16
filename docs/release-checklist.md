@@ -1,7 +1,9 @@
 # ML4GM 0.1.0 Release Checklist
 
-This is a release gate, not a statement that 0.1.0 has been released. Evidence
-was refreshed on 2026-07-17 from commit `1d304ca` plus the Task 16 working tree.
+This is a release gate, not a statement that 0.1.0 has been released. Package,
+workflow, application-draft, and governance source was verified at revision
+`514d7f2`. The subsequent Task 16 review follow-up changes audit documentation
+and its repository test only; it does not change those verified sources.
 Re-run every command against the exact revision proposed for release.
 
 ## Local reproducibility
@@ -10,10 +12,9 @@ Re-run every command against the exact revision proposed for release.
   `/tmp/ml4gm-release-venv` with Python 3.11.15.
 - [x] **editable install** — `python -m pip install -e .` completed in that
   clean environment using only the declared base dependencies.
-- [x] **Ruff format and lint** — `.venv/bin/ruff format --check .` and
-  `.venv/bin/ruff check .` exit zero after applying the one formatting change
-  reported by the first check.
-- [x] **complete pytest suite** — 164 tests passed and one optional LightGBM
+- [x] **Ruff format and lint** — `.venv/bin/ruff format --check .` reported 43
+  files formatted and `.venv/bin/ruff check .` exited zero.
+- [x] **complete pytest suite** — 167 tests passed and one optional LightGBM
   test skipped because the local x86_64 Python cannot load the installed arm64
   `libomp`. The public CI matrix must run the real LightGBM round trip.
 - [x] **wheel and sdist build** — `.venv/bin/python -m build` produced
@@ -29,21 +30,26 @@ Re-run every command against the exact revision proposed for release.
   documentation, and non-application documentation contain no match for any of
   the three machine-specific roots defined by
   `tests/repository/test_forbidden_paths.py`.
-- [x] The full-tree scan is classified rather than silently ignored:
-  `compare/` contains historical machine-specific paths;
-  `notebooks/legacy/` contains preserved hosted-notebook output;
-  `tests/repository/` contains the literal denial-list test fixtures;
-  `docs/superpowers/` contains specification examples. None is a supported
-  runtime path.
+- [x] The Task 16 brief's original scan was run exactly. It returned exit
+  status 0 and matches in `compare/` historical reference scripts and
+  `tests/repository/` denial-list literals. This is a classified inventory,
+  not a supported-code assertion. The command already excludes
+  `notebooks/legacy/` and `docs/superpowers/`. On the audit-only follow-up
+  worktree, it additionally matches the two command literals below; that
+  self-reference does not change the source-revision classification.
+- [x] A second, explicit supported-scope scan returned exit status 1 with no
+  output. That no-match result is the supported-code assertion.
 - [x] Current-tree **no restricted data in Git** check:
   `git ls-files data` returns only `data/sample/glacier_sample.csv`, which is
   labelled synthetic, and `git ls-files '*.nc' '*.pkl' '*.pt' '*.joblib'`
   returns nothing.
 - [ ] Historical-data decision — Git history contains
   `code/model_result1.npz` from commit `e3c9184`. It holds eight arrays of
-  32,404 target/prediction values and is no longer in the tracked tree. Before
-  release, Poleside must confirm that retaining this already-public derived
-  result in history is permitted, or approve a coordinated history rewrite.
+  32,404 target/prediction values and is no longer in the tracked tree. The
+  object is already in the public `origin/master` ancestry, so this finding
+  does not block publishing or reviewing the preparation branch. It does block
+  the `v0.1.0` tag/release until Poleside confirms the rights decision. Do not
+  rewrite public history without explicit owner authorization and coordination.
 - [x] Current-tree heuristic secret scan found no common API token, private-key,
   password-assignment, or API-key-assignment pattern outside the separated
   legacy/specification paths.
@@ -94,6 +100,10 @@ Re-run every command against the exact revision proposed for release.
 .venv/bin/python -m build
 .venv/bin/ml4gm evaluate --config configs/quickstart.yaml --output-dir /tmp/ml4gm-release
 .venv/bin/python -c "import ml4gm; assert ml4gm.__version__ == '0.1.0'"
+# Original Task 16 inventory: expected exit 0 with classified legacy/test matches.
+git grep -n -E 'C:\\ML4GM|/Users/|/openbayes/' -- ':!notebooks/legacy/**' ':!docs/superpowers/**'
+# Supported assertion: expected exit 1 and no output.
+git grep -n -E 'C:\\ML4GM|/Users/|/openbayes/' -- src configs README.md DATA_SOURCES.md CONTRIBUTING.md SECURITY.md MAINTAINERS.md docs ':!docs/superpowers/**' ':!docs/applications/**' ':!docs/release-checklist.md' ':!docs/completion-audit.md'
 .venv/bin/python -m pytest tests/repository/test_forbidden_paths.py
 git ls-files data
 git ls-files '*.nc' '*.pkl' '*.pt' '*.joblib'
@@ -103,7 +113,7 @@ gh run list --repo Poleside/ML4GM --workflow CI --limit 1
 gh api repos/Poleside/ML4GM/private-vulnerability-reporting
 ```
 
-The supported forbidden-path command is expected to return exit status 1 with
-no output because Git found no matches. Record that result as success; do not
-replace it with a full-tree assertion that mistakes denial-list fixtures or
-preserved legacy evidence for supported runtime code.
+Record both results. The original command's exit status 0 is correct because it
+inventories preserved reference scripts and test literals. The supported-scope
+command's exit status 1 with no output is correct because Git found no match.
+Do not conflate these two different claims.
