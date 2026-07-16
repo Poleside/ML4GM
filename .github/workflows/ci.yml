@@ -61,6 +61,8 @@ jobs:
         torch-spec:
           - "torch==2.4.*"
           - "torch>=2.4,<3"
+        numpy-spec:
+          - "numpy==1.26.*"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,6 +70,9 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev,torch]" "${{ matrix.torch-spec }}"
+      - run: >-
+          python -m pip install -e ".[dev,torch]"
+          "${{ matrix.numpy-spec }}"
+          "${{ matrix.torch-spec }}"
       - run: python tests/ci/torch_roundtrip.py
       - run: pytest tests/unit/test_neural_models.py tests/integration/test_sequence_models.py

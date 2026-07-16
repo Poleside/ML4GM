@@ -68,6 +68,16 @@ def test_ruff_excludes_only_unsupported_legacy_artifacts() -> None:
     ]
 
 
+def test_package_uses_pep639_license_metadata() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+
+    assert "setuptools>=77" in pyproject["build-system"]["requires"]
+    assert project["license"] == "Apache-2.0"
+    assert project["license-files"] == ["LICENSE"]
+    assert "License :: OSI Approved :: Apache Software License" not in project["classifiers"]
+
+
 def test_ci_validates_citation_and_built_distribution_quickstart() -> None:
     workflow = _workflow()
     jobs = workflow["jobs"]
@@ -108,13 +118,28 @@ def test_ci_runs_real_neural_tests_on_minimum_and_current_pytorch() -> None:
     matrix = strategy["matrix"]
     assert isinstance(matrix, dict)
     commands = "\n".join(_commands(torch))
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    script = (ROOT / "tests/ci/torch_roundtrip.py").read_text(encoding="utf-8")
 
     assert matrix["torch-spec"] == ["torch==2.4.*", "torch>=2.4,<3"]
+    assert matrix["numpy-spec"] == ["numpy==1.26.*"]
     assert ".[dev,torch]" in commands
+    assert "${{ matrix.numpy-spec }}" in commands
     assert "tests/ci/torch_roundtrip.py" in commands
     assert "tests/unit/test_neural_models.py" in commands
     assert "tests/integration/test_sequence_models.py" in commands
     assert "pytest.skip" not in commands
+    assert pyproject["project"]["optional-dependencies"]["torch"] == [
+        "torch>=2.4,<3",
+        "numpy>=1.26,<2",
+    ]
+    assert "pytest.skip" not in script
+    assert "pytest.importorskip" not in script
+    assert "np.__version__" in script
+    assert "torch.__version__" in script
+    assert "torch.from_numpy" in script
+    assert ".numpy()" in script
+    assert "Failed to initialize NumPy" in script
 
 
 def test_issue_and_pr_templates_cover_data_rights_and_leakage() -> None:
