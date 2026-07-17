@@ -268,6 +268,7 @@ Version 2.0, January 2004
 .ruff_cache/
 .venv/
 .worktrees/
+.superpowers/
 __pycache__/
 *.egg-info/
 build/
