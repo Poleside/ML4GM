@@ -1,10 +1,8 @@
 # ML4GM 0.1.0 Release Checklist
 
-This is a release gate, not a statement that 0.1.0 has been released. Package,
-workflow, application-draft, and governance source was verified at revision
-`514d7f2`. The subsequent Task 16 review follow-up changes audit documentation
-and its repository test only; it does not change those verified sources.
-Re-run every command against the exact revision proposed for release.
+This is a release gate, not a statement that 0.1.0 has been released. Evidence
+was refreshed on 2026-07-17 against the complete reviewed working tree.
+Re-run every command against the exact committed revision proposed for release.
 
 ## Local reproducibility
 
@@ -12,9 +10,9 @@ Re-run every command against the exact revision proposed for release.
   `/tmp/ml4gm-release-venv` with Python 3.11.15.
 - [x] **editable install** — `python -m pip install -e .` completed in that
   clean environment using only the declared base dependencies.
-- [x] **Ruff format and lint** — `.venv/bin/ruff format --check .` reported 43
+- [x] **Ruff format and lint** — `.venv/bin/ruff format --check .` reported 44
   files formatted and `.venv/bin/ruff check .` exited zero.
-- [x] **complete pytest suite** — 167 tests passed and one optional LightGBM
+- [x] **complete pytest suite** — 177 tests passed and one optional LightGBM
   test skipped because the local x86_64 Python cannot load the installed arm64
   `libomp`. The public CI matrix must run the real LightGBM round trip.
 - [x] **wheel and sdist build** — `.venv/bin/python -m build` produced
@@ -23,6 +21,11 @@ Re-run every command against the exact revision proposed for release.
   environment completed `ml4gm evaluate --config configs/quickstart.yaml`.
 - [x] **package import** — both environments verified
   `ml4gm.__version__ == "0.1.0"`.
+- [x] **authoritative run record** — integration and unit tests verify that
+  result records contain the resolved configuration, runtime/package versions,
+  coverage and metrics, immutable input SHA-256, and only a matching manifest
+  parsed and hashed from one byte snapshot. Failure records preserve provenance
+  when possible without masking the original exception.
 
 ## Repository safety and rights
 
@@ -78,8 +81,9 @@ Re-run every command against the exact revision proposed for release.
 ## Public release gates
 
 - [ ] **GitHub CI status** — the public repository currently has no workflow
-  named `CI`; push or merge the reviewed branch, then require every job in
-  `.github/workflows/ci.yml` to pass on the public revision.
+  named `CI`. After maintainer review, push the feature branch and open a draft
+  pull request to trigger CI. Require every job in `.github/workflows/ci.yml`
+  to pass before merging to `master`.
 - [x] **public repository visibility** — `gh repo view` reports
   `Poleside/ML4GM` is public.
 - [ ] Public release contents — the public `master` commit is `2d4bf00`; it
@@ -90,7 +94,8 @@ Re-run every command against the exact revision proposed for release.
 - [ ] Private vulnerability reporting — the GitHub endpoint reports
   `"enabled": false`; Poleside should enable it, or the maintainers must retain
   and approve the fallback channel documented in `SECURITY.md`.
-- [ ] Maintainer review and explicit release approval.
+- [ ] Maintainer review before pushing the feature branch/opening a draft PR;
+  separate explicit approval is required before merge and release.
 - [ ] Create and push `v0.1.0` only after every preceding release gate is
   closed. Until then, keep the changelog under `[Unreleased]`.
 - [ ] Re-open both forms, fill the approved personal details, obtain explicit
@@ -122,3 +127,8 @@ Record both results. The original command's exit status 0 is correct because it
 inventories preserved reference scripts and test literals. The supported-scope
 command's exit status 1 with no output is correct because Git found no match.
 Do not conflate these two different claims.
+
+After maintainer review, pushing this feature branch and opening a draft PR is
+allowed and is how public CI evidence should be collected. Do not merge to
+`master`, create or push `v0.1.0`, publish a release, add a dated 0.1.0
+changelog heading, or submit either form until the corresponding gates close.

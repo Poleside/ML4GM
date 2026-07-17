@@ -28,8 +28,8 @@ def test_release_checklist_covers_every_required_gate() -> None:
     for gate in required_gates:
         assert gate in text
 
-    assert "43 files formatted" in normalized
-    assert "167 tests passed" in normalized
+    assert "44 files formatted" in normalized
+    assert "177 tests passed" in normalized
     assert "Original Task 16 inventory: expected exit 0" in normalized
     assert "Supported assertion: expected exit 1 and no output" in normalized
     assert "':!notebooks/legacy/**' ':!docs/superpowers/**'" in text
@@ -37,6 +37,9 @@ def test_release_checklist_covers_every_required_gate() -> None:
         "-- src configs README.md DATA_SOURCES.md CONTRIBUTING.md SECURITY.md MAINTAINERS.md docs"
     ) in text
     assert "':!docs/release-checklist.md' ':!docs/completion-audit.md'" in text
+    assert "complete reviewed working tree" in normalized
+    assert "push the feature branch and open a draft pull request" in normalized
+    assert "before merging to `master`" in normalized
 
 
 def test_completion_audit_maps_all_design_success_criteria() -> None:
@@ -47,13 +50,18 @@ def test_completion_audit_maps_all_design_success_criteria() -> None:
 
     assert "public branch and ci are not yet verified" in normalized
     assert "USER INPUT REQUIRED" in text
-    assert "Do not create `v0.1.0`" in text
-    assert "revision `514d7f2`" in text
-    assert "Ruff: 43 files formatted" in text
-    assert "Tests: 167 passed, one LightGBM runtime test skipped" in text
+    assert "create or push `v0.1.0`" in text
+    assert "verified together as one working tree" in normalized
+    assert "Ruff: 44 files formatted" in text
+    assert "Tests: 177 passed, one LightGBM runtime test skipped" in text
     assert "Original forbidden-path inventory: exit status 0" in text
     assert "Supported-scope forbidden-path assertion: exit status 1 with no output" in text
     assert "preparation-branch publication blocker" in text
+    assert "permitted to push the feature branch and open a draft pull request" in normalized
+    assert "do not merge to `master`" in normalized
+    assert "blocking `dependency-audit` with `pip-audit`" in text
+    assert "full-history `secret-scan` with Gitleaks" in text
+    assert "immutable input snapshot" in text
 
 
 def test_changelog_keeps_release_unreleased_while_external_gates_are_open() -> None:
