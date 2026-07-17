@@ -174,7 +174,13 @@ def test_ci_scans_full_git_history_for_secrets_with_minimal_permissions() -> Non
     assert secret_scan["permissions"] == {"contents": "read"}
     assert steps == [
         {"uses": "actions/checkout@v4", "with": {"fetch-depth": 0}},
-        {"uses": "gitleaks/gitleaks-action@v2"},
+        {
+            "uses": "gitleaks/gitleaks-action@v3",
+            "env": {
+                "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
+                "GITLEAKS_ENABLE_COMMENTS": "false",
+            },
+        },
     ]
 
 
