@@ -61,9 +61,12 @@ Re-run every command against the exact committed revision proposed for release.
   blocking `pip-audit`, while `secret-scan` checks the complete Git history
   with the official Gitleaks action. Repository tests verify their commands,
   permissions, and checkout depth.
-- [ ] Run the configured dependency and secret-scanning gates on the public
-  revision. Local configuration and heuristic scans are not substitutes for a
-  successful public CI run or GitHub security features.
+- [x] Public CI completed twice for commit `82cf975d0530cdc2d0e9020022e1bd37a0b575b0`:
+  push run `29551062270` and pull-request run `29551097543` each passed quality,
+  package, LightGBM, both PyTorch environments, dependency audit, and
+  full-history secret scanning. Local configuration and heuristic scans remain
+  supporting evidence, not substitutes for this public result or GitHub
+  security features.
 
 ## Project and application metadata
 
@@ -75,15 +78,18 @@ Re-run every command against the exact committed revision proposed for release.
   limit; repository tests enforce the limit.
 - [ ] Resolve every `USER INPUT REQUIRED` field in both application drafts:
   applicant name, email, OpenAI Organization ID, and LinkedIn URL where used.
-- [ ] Recheck all application wording after the branch is public. The current
-  drafts explicitly say that the preparation branch is not yet public.
+- [x] Application claims were refreshed after publishing the preparation branch
+  and opening draft PR [#1](https://github.com/Poleside/ML4GM/pull/1). They
+  distinguish the public branch/green CI evidence from the still-unreleased
+  default branch. This documentation refresh is locally verified; after it is
+  committed and pushed, recheck it on the exact merge revision.
 
 ## Public release gates
 
-- [ ] **GitHub CI status** — the public repository currently has no workflow
-  named `CI`. After maintainer review, push the feature branch and open a draft
-  pull request to trigger CI. Require every job in `.github/workflows/ci.yml`
-  to pass before merging to `master`.
+- [x] **GitHub CI status** — draft PR [#1](https://github.com/Poleside/ML4GM/pull/1)
+  is open for `codex/ml4gm-open-source` into `master`; both the push and
+  pull-request CI runs passed every job in `.github/workflows/ci.yml`. Require
+  the same successful checks on the exact revision before merging to `master`.
 - [x] **public repository visibility** — `gh repo view` reports
   `Poleside/ML4GM` is public.
 - [ ] Public release contents — the public `master` commit is `2d4bf00`; it
@@ -94,8 +100,9 @@ Re-run every command against the exact committed revision proposed for release.
 - [ ] Private vulnerability reporting — the GitHub endpoint reports
   `"enabled": false`; Poleside should enable it, or the maintainers must retain
   and approve the fallback channel documented in `SECURITY.md`.
-- [ ] Maintainer review before pushing the feature branch/opening a draft PR;
-  separate explicit approval is required before merge and release.
+- [x] Maintainer review authorized pushing the feature branch and opening draft
+  PR [#1](https://github.com/Poleside/ML4GM/pull/1); separate explicit approval
+  is still required before merge and release.
 - [ ] Create and push `v0.1.0` only after every preceding release gate is
   closed. Until then, keep the changelog under `[Unreleased]`.
 - [ ] Re-open both forms, fill the approved personal details, obtain explicit

@@ -1,8 +1,9 @@
 # Codex for Open Source Application
 
 Copy only the answer beneath each heading into the matching form field. Refresh
-the repository snapshot immediately before submission because the public
-repository does not yet contain this open-source preparation branch.
+the repository snapshot immediately before submission: the public preparation
+branch and draft PR are verified, but the default branch has not yet merged the
+Apache-2.0 release preparation.
 
 ## First name
 
@@ -59,8 +60,8 @@ ML4GM is being converted from a researcher-specific notebook workspace into a pu
   reproduced above. Each of the three narrative fields has a 500-character
   maximum.
 - Verified 2026-07-17 public submission-preparation snapshot: 1 star, 0 forks,
-  0 open issues, 0 open pull requests, 0 releases, default branch `master`,
-  viewer permission `WRITE`, GitHub-detected license: none. These values are a
+  0 open issues, 1 open draft pull request, 0 releases, default branch `master`,
+  viewer permission `WRITE`, GitHub-detected license: none on `master`. These values are a
   point-in-time snapshot, not evidence of adoption.
 - Snapshot commands:
   `gh repo view Poleside/ML4GM --json stargazerCount,forkCount,issues,pullRequests,licenseInfo,defaultBranchRef,viewerPermission,latestRelease`;
@@ -68,9 +69,11 @@ ML4GM is being converted from a researcher-specific notebook workspace into a pu
   `gh api 'repos/Poleside/ML4GM/issues?state=open&per_page=100'`;
   `gh api 'repos/Poleside/ML4GM/pulls?state=open&per_page=100'`; and
   `gh api repos/Poleside/ML4GM/releases`.
-- The public repository snapshot reports no detected license because this
-  Apache-2.0 transformation is still on an unpushed preparation branch. Refresh
-  the metrics and confirm the public license before submitting.
+- Draft PR [#1](https://github.com/Poleside/ML4GM/pull/1) publishes the
+  Apache-2.0 preparation branch and both associated CI runs passed every job.
+  The default branch still reports no detected license because it has not
+  merged the preparation branch. Refresh metrics and confirm the default-branch
+  license before submitting.
 - Repository authority is documented in `MAINTAINERS.md`: Poleside is project
   lead/owner; HectorGao is a core collaborator with write access. The live
   GitHub query independently returned viewer permission `WRITE`.

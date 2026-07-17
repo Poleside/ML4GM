@@ -57,14 +57,20 @@ def test_public_metrics_are_dated_submission_snapshots(path: Path) -> None:
         "1 star",
         "0 forks",
         "0 open issues",
-        "0 open pull requests",
+        "1 open draft pull request",
         "0 releases",
         "default branch `master`",
         "viewer permission `WRITE`",
-        "GitHub-detected license: none",
+        "GitHub-detected license: none on `master`",
         "submission-preparation snapshot",
     ]:
         assert claim in text
+
+    for evidence in [
+        "[#1](https://github.com/Poleside/ML4GM/pull/1)",
+        "both associated CI runs passed every job",
+    ]:
+        assert evidence in text
 
 
 def test_scientific_scale_claims_are_tied_to_legacy_evidence() -> None:

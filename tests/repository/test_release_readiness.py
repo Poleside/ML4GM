@@ -38,7 +38,13 @@ def test_release_checklist_covers_every_required_gate() -> None:
     ) in text
     assert "':!docs/release-checklist.md' ':!docs/completion-audit.md'" in text
     assert "complete reviewed working tree" in normalized
-    assert "push the feature branch and open a draft pull request" in normalized
+    assert "both the push and pull-request CI runs passed every job" in normalized
+    for public_evidence in [
+        "82cf975d0530cdc2d0e9020022e1bd37a0b575b0",
+        "29551062270",
+        "29551097543",
+    ]:
+        assert public_evidence in text
     assert "before merging to `master`" in normalized
 
 
@@ -48,7 +54,13 @@ def test_completion_audit_maps_all_design_success_criteria() -> None:
     for criterion in range(1, 11):
         assert f"| {criterion} |" in text
 
-    assert "public branch and ci are not yet verified" in normalized
+    assert "public preparation branch and its ci are verified" in normalized
+    for public_evidence in [
+        "82cf975d0530cdc2d0e9020022e1bd37a0b575b0",
+        "29551062270",
+        "29551097543",
+    ]:
+        assert public_evidence in text
     assert "USER INPUT REQUIRED" in text
     assert "create or push `v0.1.0`" in text
     assert "verified together as one working tree" in normalized
@@ -57,7 +69,7 @@ def test_completion_audit_maps_all_design_success_criteria() -> None:
     assert "Original forbidden-path inventory: exit status 0" in text
     assert "Supported-scope forbidden-path assertion: exit status 1 with no output" in text
     assert "preparation-branch publication blocker" in text
-    assert "permitted to push the feature branch and open a draft pull request" in normalized
+    assert "public preparation branch and draft pr #1" in normalized
     assert "do not merge to `master`" in normalized
     assert "blocking `dependency-audit` with `pip-audit`" in text
     assert "full-history `secret-scan` with Gitleaks" in text
